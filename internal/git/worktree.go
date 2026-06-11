@@ -84,3 +84,57 @@ func (g *GitService) ListWorktrees() ([]model.Worktree, error) {
 
 	return parseWorktreeList(string(output))
 }
+
+// AddWorktree creates a new worktree
+func (g *GitService) AddWorktree(path, branch, base string, createBranch bool) error {
+	var args []string
+	args = append(args, "worktree", "add")
+	
+	if createBranch {
+		args = append(args, "-b", branch)
+	}
+	
+	args = append(args, path)
+	
+	if createBranch {
+		args = append(args, base)
+	} else {
+		args = append(args, branch)
+	}
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = g.RepoRoot
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to add worktree: %w\n%s", err, output)
+	}
+
+	return nil
+}
+
+// RemoveWorktree removes a worktree
+func (g *GitService) RemoveWorktree(path string) error {
+	cmd := exec.Command("git", "worktree", "remove", path)
+	cmd.Dir = g.RepoRoot
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to remove worktree %s: %w\n%s", path, err, output)
+	}
+
+	return nil
+}
+
+// PruneWorktrees removes stale worktree metadata
+func (g *GitService) PruneWorktrees() error {
+	cmd := exec.Command("git", "worktree", "prune")
+	cmd.Dir = g.RepoRoot
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to prune worktrees: %w\n%s", err, output)
+	}
+
+	return nil
+}

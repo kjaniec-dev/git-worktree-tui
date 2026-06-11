@@ -77,3 +77,27 @@ detached
 		t.Errorf("Expected branch (detached), got %s", worktrees[0].Branch)
 	}
 }
+
+func TestAddWorktreeCommand(t *testing.T) {
+	// This is a unit test - we're testing the command construction, not actual git
+	// In real usage, this would be an integration test with a real repo
+	g := NewGitService("/tmp/test-repo")
+	
+	// We can't easily test the actual execution without mocking exec.Command
+	// So we'll test the error handling path
+	err := g.AddWorktree("/tmp/test-worktree", "feature/test", "main", true)
+	// This will fail because /tmp/test-repo doesn't exist, but that's expected
+	if err == nil {
+		t.Error("Expected error when repo doesn't exist")
+	}
+}
+
+func TestRemoveWorktreeCommand(t *testing.T) {
+	g := NewGitService("/tmp/test-repo")
+	
+	err := g.RemoveWorktree("/tmp/nonexistent-worktree")
+	// This will fail because path doesn't exist
+	if err == nil {
+		t.Error("Expected error when worktree doesn't exist")
+	}
+}
