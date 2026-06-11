@@ -35,6 +35,17 @@ func run(cmd *cobra.Command, args []string) error {
 	// Create git service
 	gitService := git.NewGitService(repoRoot)
 
+	// Check git version
+	version, err := gitService.GetVersion()
+	if err != nil {
+		return fmt.Errorf("failed to get git version: %w", err)
+	}
+
+	if !version.IsAtLeast(2, 39) {
+		fmt.Fprintf(os.Stderr, "Warning: git %d.%d.%d detected, 2.39+ recommended\n",
+			version.Major, version.Minor, version.Patch)
+	}
+
 	// Create and run TUI
 	model := tui.NewModel(gitService)
 	p := tea.NewProgram(model, tea.WithAltScreen())
