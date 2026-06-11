@@ -31,13 +31,6 @@ type Model struct {
 	cleanup   cleanupModel
 }
 
-// cleanupModel is a placeholder until cleanup.go is implemented
-type cleanupModel struct {
-	staleWorktrees []int
-	selected       []bool
-	currentIndex   int
-}
-
 func NewModel(gitService *git.GitService) Model {
 	branches, _ := gitService.ListBranches()
 	baseBranch := "main"
@@ -69,6 +62,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleDeleteKeyPress(msg)
 		case modeCreate:
 			return m.handleCreateKeyPress(msg)
+		case modeCleanup:
+			return m.handleCleanupKeyPress(msg)
 		default:
 			return m.handleKeyPress(msg)
 		}
@@ -93,6 +88,9 @@ func (m Model) View() string {
 	}
 	if m.mode == modeCreate {
 		return m.viewCreateModal()
+	}
+	if m.mode == modeCleanup {
+		return m.viewCleanupModal()
 	}
 
 	if len(m.worktrees) == 0 {
@@ -185,6 +183,11 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
 		m.mode = modeCreate
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
+		m.findStaleWorktrees()
+		m.cleanup.currentIndex = 0
+		m.mode = modeCleanup
 		return m, nil
 	}
 	return m, nil
