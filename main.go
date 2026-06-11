@@ -1,11 +1,8 @@
+// main.go
 package main
 
-import (
-	"fmt"
-	"os"
-)
+import "github.com/kjaniec-dev/git-worktree-tui/cmd"
 
 func main() {
-	fmt.Println("git-worktree-tui")
-	os.Exit(0)
+	cmd.Execute()
 }
