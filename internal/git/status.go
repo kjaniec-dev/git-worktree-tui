@@ -2,7 +2,6 @@ package git
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/kjaniec-dev/git-worktree-tui/internal/model"
@@ -37,16 +36,13 @@ func parseStatus(output string) model.WorktreeStatus {
 
 // GetWorktreeStatus returns the status of a worktree
 func (g *GitService) GetWorktreeStatus(worktreePath string) (*model.WorktreeStatus, error) {
-	cmd := exec.Command("git", "status", "--porcelain=v2", "--branch", "--ahead-behind")
-	cmd.Dir = worktreePath
-
-	output, err := cmd.CombinedOutput()
+	output, err := g.runGitCommandInDir(worktreePath, "status", "--porcelain=v2", "--branch", "--ahead-behind")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get status: %w\n%s", err, output)
+		return nil, fmt.Errorf("failed to get status: %w", err)
 	}
 
 	status := parseStatus(string(output))
-	
+
 	// Parse ahead/behind from output
 	// Format: # branch.ab +N -M
 	lines := strings.Split(string(output), "\n")
@@ -62,6 +58,6 @@ func (g *GitService) GetWorktreeStatus(worktreePath string) (*model.WorktreeStat
 			}
 		}
 	}
-	
+
 	return &status, nil
 }

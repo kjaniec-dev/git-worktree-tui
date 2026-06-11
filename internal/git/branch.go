@@ -2,7 +2,6 @@ package git
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -30,12 +29,9 @@ func parseBranchList(output string) []string {
 
 // ListBranches returns all local branches
 func (g *GitService) ListBranches() ([]string, error) {
-	cmd := exec.Command("git", "branch", "--list")
-	cmd.Dir = g.RepoRoot
-
-	output, err := cmd.CombinedOutput()
+	output, err := g.runGitCommand("branch", "--list")
 	if err != nil {
-		return nil, fmt.Errorf("failed to list branches: %w\n%s", err, output)
+		return nil, fmt.Errorf("failed to list branches: %w", err)
 	}
 
 	return parseBranchList(string(output)), nil
@@ -43,9 +39,6 @@ func (g *GitService) ListBranches() ([]string, error) {
 
 // BranchExists checks if a branch exists
 func (g *GitService) BranchExists(branch string) (bool, error) {
-	cmd := exec.Command("git", "rev-parse", "--verify", branch)
-	cmd.Dir = g.RepoRoot
-
-	err := cmd.Run()
+	_, err := g.runGitCommand("rev-parse", "--verify", branch)
 	return err == nil, nil
 }
