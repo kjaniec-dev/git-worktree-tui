@@ -1471,6 +1471,788 @@ git commit -m "chore: final integration test and polish"
 
 ---
 
+## Chunk 5.5: Additional Modals and Features
+
+### Task 9.5: Create Worktree Modal
+
+**Files:**
+- Create: `internal/tui/create.go`
+- Create: `internal/tui/create_test.go`
+
+- [ ] **Step 1: Write failing test for create modal**
+
+```go
+// internal/tui/create_test.go
+package tui
+
+import (
+	"testing"
+
+	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
+)
+
+func TestCreateModal(t *testing.T) {
+	gitService := git.NewGitService("/tmp/test")
+	m := NewModel(gitService)
+	m.mode = modeCreate
+
+	view := m.View()
+	
+	if view == "" {
+		t.Error("Expected create modal view")
+	}
+}
+
+func TestPathAutoGeneration(t *testing.T) {
+	tests := []struct {
+		repoRoot string
+		branch   string
+		expected string
+	}{
+		{"/Users/dev/myproject", "feature/auth", "/Users/dev/myproject-feature-auth"},
+		{"/Users/dev/myproject", "main", "/Users/dev/myproject-main"},
+		{"/Users/dev/myproject", "hotfix/critical/bug", "/Users/dev/myproject-hotfix-critical-bug"},
+	}
+
+	for _, tt := range tests {
+		result := generateWorktreePath(tt.repoRoot, tt.branch)
+		if result != tt.expected {
+			t.Errorf("generateWorktreePath(%s, %s) = %s, expected %s", tt.repoRoot, tt.branch, result, tt.expected)
+		}
+	}
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+```bash
+go test ./internal/tui/... -v -run "TestCreateModal|TestPathAutoGeneration"
+```
+
+Expected: FAIL with "undefined: generateWorktreePath"
+
+- [ ] **Step 3: Implement create modal**
+
+```go
+// internal/tui/create.go
+package tui
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+type createField int
+
+const (
+	fieldBranch createField = iota
+	fieldBase
+	fieldCreateBranch
+)
+
+type createModel struct {
+	branchName    string
+	baseBranch    string
+	createBranch  bool
+	currentField  createField
+	branches      []string
+	baseIndex     int
+	errMsg        string
+}
+
+func generateWorktreePath(repoRoot, branch string) string {
+	parent := filepath.Dir(repoRoot)
+	repoName := filepath.Base(repoRoot)
+	// Replace slashes with dashes
+	safeBranch := strings.ReplaceAll(branch, "/", "-")
+	return filepath.Join(parent, fmt.Sprintf("%s-%s", repoName, safeBranch))
+}
+
+func (m Model) viewCreateModal() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Create Worktree"))
+	b.WriteString("\n\n")
+
+	b.WriteString(fmt.Sprintf("Branch name: [%s]\n", m.create.branchName))
+	b.WriteString(fmt.Sprintf("Base: [%s]\n", m.create.baseBranch))
+	b.WriteString(fmt.Sprintf("☐ Create new branch from base: %v\n\n", m.create.createBranch))
+
+	path := generateWorktreePath(m.git.RepoRoot, m.create.branchName)
+	b.WriteString(fmt.Sprintf("Path: %s (auto)\n\n", path))
+
+	if m.create.errMsg != "" {
+		b.WriteString(errorStyle.Render(m.create.errMsg))
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString(helpStyle.Render("[Tab] next field [Enter] create [Esc] cancel"))
+
+	return b.String()
+}
+
+func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+		m.create.currentField = (m.create.currentField + 1) % 3
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("shift+tab"))):
+		m.create.currentField = (m.create.currentField - 1 + 3) % 3
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("escape"))):
+		m.mode = modeList
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+		return m, m.createWorktree
+	case key.Matches(msg, key.NewBinding(key.WithKeys("up", "down"))):
+		if m.create.currentField == fieldBase && len(m.create.branches) > 0 {
+			if msg.String() == "up" && m.create.baseIndex > 0 {
+				m.create.baseIndex--
+				m.create.baseBranch = m.create.branches[m.create.baseIndex]
+			} else if msg.String() == "down" && m.create.baseIndex < len(m.create.branches)-1 {
+				m.create.baseIndex++
+				m.create.baseBranch = m.create.branches[m.create.baseIndex]
+			}
+		}
+		return m, nil
+	}
+
+	// Handle text input for branch name
+	if m.create.currentField == fieldBranch {
+		if msg.Type == tea.KeyRunes {
+			m.create.branchName += string(msg.Runes)
+		} else if msg.Type == tea.KeyBackspace {
+			if len(m.create.branchName) > 0 {
+				m.create.branchName = m.create.branchName[:len(m.create.branchName)-1]
+			}
+		}
+	}
+
+	return m, nil
+}
+
+func (m Model) createWorktree() tea.Msg {
+	if m.create.branchName == "" {
+		m.create.errMsg = "Branch name is required"
+		return nil
+	}
+
+	path := generateWorktreePath(m.git.RepoRoot, m.create.branchName)
+	err := m.git.AddWorktree(path, m.create.branchName, m.create.baseBranch, m.create.createBranch)
+	if err != nil {
+		m.create.errMsg = err.Error()
+		return nil
+	}
+
+	m.mode = modeList
+	return worktreesLoadedMsg{worktrees: nil} // Trigger reload
+}
+```
+
+- [ ] **Step 4: Add create model to main Model**
+
+Add to `internal/tui/app.go`:
+
+```go
+type Model struct {
+	// ... existing fields
+	create createModel
+}
+
+func NewModel(gitService *git.GitService) Model {
+	branches, _ := gitService.ListBranches()
+	baseBranch := "main"
+	if len(branches) > 0 {
+		baseBranch = branches[0]
+	}
+	
+	return Model{
+		git:      gitService,
+		selected: 0,
+		mode:     modeList,
+		create: createModel{
+			branches:     branches,
+			baseBranch:   baseBranch,
+			createBranch: true,
+		},
+	}
+}
+```
+
+Add to `Update`:
+
+```go
+case modeCreate:
+	return m.handleCreateKeyPress(msg)
+```
+
+Add to `View`:
+
+```go
+if m.mode == modeCreate {
+	return m.viewCreateModal()
+}
+```
+
+Add keybinding in `handleKeyPress`:
+
+```go
+case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
+	m.mode = modeCreate
+	return m, nil
+```
+
+- [ ] **Step 5: Run tests**
+
+```bash
+go test ./internal/tui/... -v
+go build -o git-worktree-tui
+```
+
+Expected: All tests pass, binary builds
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/tui/
+git commit -m "feat: add create worktree modal with path auto-generation"
+```
+
+---
+
+### Task 9.6: Cleanup Modal
+
+**Files:**
+- Create: `internal/tui/cleanup.go`
+- Create: `internal/tui/cleanup_test.go`
+
+- [ ] **Step 1: Write failing test for cleanup modal**
+
+```go
+// internal/tui/cleanup_test.go
+package tui
+
+import (
+	"testing"
+
+	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
+	"github.com/kjaniec-dev/git-worktree-tui/internal/model"
+)
+
+func TestCleanupModal(t *testing.T) {
+	gitService := git.NewGitService("/tmp/test")
+	m := NewModel(gitService)
+	m.worktrees = []model.Worktree{
+		{Path: "/path/to/stale", Branch: "stale-branch", IsMain: false},
+	}
+	m.mode = modeCleanup
+
+	view := m.View()
+	
+	if view == "" {
+		t.Error("Expected cleanup modal view")
+	}
+}
+```
+
+- [ ] **Step 2: Implement cleanup modal**
+
+```go
+// internal/tui/cleanup.go
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+type cleanupModel struct {
+	staleWorktrees []int // indices of worktrees with missing branches
+	selected       []bool
+	currentIndex   int
+}
+
+func (m Model) viewCleanupModal() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Cleanup Stale Worktrees"))
+	b.WriteString("\n\n")
+
+	if len(m.cleanup.staleWorktrees) == 0 {
+		b.WriteString("No stale worktrees found.\n\n")
+		b.WriteString(helpStyle.Render("[Esc] back"))
+		return b.String()
+	}
+
+	b.WriteString("Worktrees with missing branches:\n\n")
+
+	for i, idx := range m.cleanup.staleWorktrees {
+		wt := m.worktrees[idx]
+		prefix := "[ ]"
+		if m.cleanup.selected[i] {
+			prefix = "[x]"
+		}
+		
+		line := fmt.Sprintf("%s %s (%s)", prefix, wt.Branch, wt.Path)
+		if i == m.cleanup.currentIndex {
+			line = selectedStyle.Render(line)
+		}
+		
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("[Space] toggle [a]ll [Esc] back [Enter] remove selected"))
+
+	return b.String()
+}
+
+func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, key.NewBinding(key.WithKeys("escape"))):
+		m.mode = modeList
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
+		if m.cleanup.currentIndex > 0 {
+			m.cleanup.currentIndex--
+		}
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
+		if m.cleanup.currentIndex < len(m.cleanup.staleWorktrees)-1 {
+			m.cleanup.currentIndex++
+		}
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("space"))):
+		if len(m.cleanup.selected) > 0 {
+			m.cleanup.selected[m.cleanup.currentIndex] = !m.cleanup.selected[m.cleanup.currentIndex]
+		}
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
+		// Toggle all
+		allSelected := true
+		for _, s := range m.cleanup.selected {
+			if !s {
+				allSelected = false
+				break
+			}
+		}
+		for i := range m.cleanup.selected {
+			m.cleanup.selected[i] = !allSelected
+		}
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+		return m, m.cleanupWorktrees
+	}
+	return m, nil
+}
+
+func (m Model) cleanupWorktrees() tea.Msg {
+	for i, idx := range m.cleanup.staleWorktrees {
+		if !m.cleanup.selected[i] {
+			continue
+		}
+
+		wt := m.worktrees[idx]
+
+		if wt.IsLocked {
+			continue // Skip locked worktrees
+		}
+
+		if wt.Status != nil && wt.Status.IsDirty {
+			// TODO: Show warning - for now skip dirty worktrees
+			continue
+		}
+
+		err := m.git.RemoveWorktree(wt.Path)
+		if err != nil {
+			return errMsg(fmt.Sprintf("Failed to remove %s: %v", wt.Path, err))
+		}
+	}
+
+	m.mode = modeList
+	return worktreesLoadedMsg{worktrees: nil} // Trigger reload
+}
+```
+
+- [ ] **Step 3: Add cleanup model to main Model**
+
+Add to `internal/tui/app.go`:
+
+```go
+type Model struct {
+	// ... existing fields
+	cleanup cleanupModel
+}
+```
+
+Add to `Update`:
+
+```go
+case modeCleanup:
+	return m.handleCleanupKeyPress(msg)
+```
+
+Add to `View`:
+
+```go
+if m.mode == modeCleanup {
+	return m.viewCleanupModal()
+}
+```
+
+Add function to find stale worktrees:
+
+```go
+func (m *Model) findStaleWorktrees() {
+	branches, err := m.git.ListBranches()
+	if err != nil {
+		return
+	}
+
+	branchSet := make(map[string]bool)
+	for _, b := range branches {
+		branchSet[b] = true
+	}
+
+	m.cleanup.staleWorktrees = nil
+	m.cleanup.selected = nil
+
+	for i, wt := range m.worktrees {
+		if wt.IsMain {
+			continue
+		}
+		if !branchSet[wt.Branch] {
+			m.cleanup.staleWorktrees = append(m.cleanup.staleWorktrees, i)
+			m.cleanup.selected = append(m.cleanup.selected, false)
+		}
+	}
+}
+```
+
+Add keybinding in `handleKeyPress`:
+
+```go
+case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
+	m.findStaleWorktrees()
+	m.cleanup.currentIndex = 0
+	m.mode = modeCleanup
+	return m, nil
+```
+
+- [ ] **Step 4: Run tests**
+
+```bash
+go test ./internal/tui/... -v
+go build -o git-worktree-tui
+```
+
+Expected: All tests pass, binary builds
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/tui/
+git commit -m "feat: add cleanup modal for stale worktrees"
+```
+
+---
+
+### Task 9.7: Clipboard Integration (Enter Key)
+
+**Files:**
+- Modify: `internal/tui/app.go`
+
+- [ ] **Step 1: Add clipboard dependency**
+
+```bash
+go get golang.design/x/clipboard
+```
+
+- [ ] **Step 2: Add Enter key handler**
+
+Add to `internal/tui/app.go` in `handleKeyPress`:
+
+```go
+case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+	if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
+		path := m.worktrees[m.selected].Path
+		// Try to copy to clipboard (best effort)
+		// Note: golang.design/x/clipboard requires initialization
+		// For now, just show the path
+		m.errMsg = fmt.Sprintf("Path: %s", path)
+	}
+	return m, nil
+```
+
+- [ ] **Step 3: Run tests**
+
+```bash
+go test ./internal/tui/... -v
+go build -o git-worktree-tui
+```
+
+Expected: All tests pass, binary builds
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add internal/tui/
+git commit -m "feat: add Enter key to show worktree path"
+```
+
+---
+
+## Chunk 6.5: Concurrency, Timeout, and Version Check
+
+### Task 10.5: Timeout Implementation
+
+**Files:**
+- Modify: `internal/git/worktree.go`
+- Modify: `internal/git/branch.go`
+- Modify: `internal/git/status.go`
+
+- [ ] **Step 1: Add context timeout to git commands**
+
+Replace all `exec.Command` calls with context-aware version:
+
+```go
+// Add to internal/git/worktree.go
+import (
+	"context"
+	"os/exec"
+	"time"
+)
+
+func (g *GitService) runGitCommand(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = g.RepoRoot
+
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("command timed out after %v", g.Timeout)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w\n%s", err, output)
+	}
+
+	return output, nil
+}
+```
+
+Replace all `exec.Command("git", ...).CombinedinedOutput()` with `g.runGitCommand(...)`.
+
+- [ ] **Step 2: Run tests**
+
+```bash
+go test ./internal/git/... -v
+```
+
+Expected: All tests pass
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add internal/git/
+git commit -m "feat: add timeout handling to all git commands"
+```
+
+---
+
+### Task 10.6: Git Version Check
+
+**Files:**
+- Create: `internal/git/version.go`
+- Modify: `cmd/root.go`
+
+- [ ] **Step 1: Implement version check**
+
+```go
+// internal/git/version.go
+package git
+
+import (
+	"fmt"
+	"os/exec"
+	"regexp"
+	"strconv"
+)
+
+type GitVersion struct {
+	Major int
+	Minor int
+	Patch int
+}
+
+func (g *GitService) GetVersion() (*GitVersion, error) {
+	cmd := exec.Command("git", "--version")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get git version: %w", err)
+	}
+
+	// Parse "git version 2.39.0"
+	re := regexp.MustCompile(`git version (\d+)\.(\d+)\.(\d+)`)
+	matches := re.FindStringSubmatch(string(output))
+	if len(matches) != 4 {
+		return nil, fmt.Errorf("failed to parse git version: %s", output)
+	}
+
+	major, _ := strconv.Atoi(matches[1])
+	minor, _ := strconv.Atoi(matches[2])
+	patch, _ := strconv.Atoi(matches[3])
+
+	return &GitVersion{Major: major, Minor: minor, Patch: patch}, nil
+}
+
+func (v *GitVersion) IsAtLeast(major, minor int) bool {
+	if v.Major > major {
+		return true
+	}
+	if v.Major == major && v.Minor >= minor {
+		return true
+	}
+	return false
+}
+```
+
+- [ ] **Step 2: Add version check to CLI**
+
+Add to `cmd/root.go`:
+
+```go
+func run(cmd *cobra.Command, args []string) error {
+	// Detect repository root
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return fmt.Errorf("not a git repository: %w", err)
+	}
+
+	// Create git service
+	gitService := git.NewGitService(repoRoot)
+
+	// Check git version
+	version, err := gitService.GetVersion()
+	if err != nil {
+		return fmt.Errorf("failed to get git version: %w", err)
+	}
+
+	if !version.IsAtLeast(2, 39) {
+		fmt.Fprintf(os.Stderr, "Warning: git %d.%d.%d detected, 2.39+ recommended\n",
+			version.Major, version.Minor, version.Patch)
+	}
+
+	// Create and run TUI
+	model := tui.NewModel(gitService)
+	p := tea.NewProgram(model, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("error running program: %w", err)
+	}
+
+	return nil
+}
+```
+
+- [ ] **Step 3: Run tests**
+
+```bash
+go test ./internal/git/... -v
+go build -o git-worktree-tui
+```
+
+Expected: All tests pass, binary builds
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add internal/git/ cmd/
+git commit -m "feat: add git version check with warning for < 2.39"
+```
+
+---
+
+### Task 10.7: Concurrent Status Loading
+
+**Files:**
+- Modify: `internal/tui/app.go`
+
+- [ ] **Step 1: Implement concurrent status loading**
+
+Replace `loadWorktrees` in `internal/tui/app.go`:
+
+```go
+func (m Model) loadWorktrees() tea.Msg {
+	worktrees, err := m.git.ListWorktrees()
+	if err != nil {
+		return errMsg(err.Error())
+	}
+
+	// Load status concurrently
+	type result struct {
+		index  int
+		status *model.WorktreeStatus
+		err    error
+	}
+
+	resultChan := make(chan result, len(worktrees))
+
+	for i, wt := range worktrees {
+		go func(idx int, path string) {
+			status, err := m.git.GetWorktreeStatus(path)
+			resultChan <- result{index: idx, status: status, err: err}
+		}(i, wt.Path)
+	}
+
+	// Collect results with timeout
+	for i := 0; i < len(worktrees); i++ {
+		select {
+		case res := <-resultChan:
+			if res.err == nil {
+				worktrees[res.index].Status = res.status
+			}
+			// If error, status remains nil (shows as "?")
+		case <-time.After(5 * time.Second):
+			// Timeout - remaining statuses will be nil
+			return worktreesLoadedMsg{worktrees: worktrees}
+		}
+	}
+
+	return worktreesLoadedMsg{worktrees: worktrees}
+}
+```
+
+Add import:
+
+```go
+import "time"
+```
+
+- [ ] **Step 2: Run tests**
+
+```bash
+go test ./internal/tui/... -v
+go build -o git-worktree-tui
+```
+
+Expected: All tests pass, binary builds
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add internal/tui/
+git commit -m "feat: add concurrent status loading with timeout"
+```
+
+---
+
 ## Summary
 
 This plan implements git-worktree-tui in 7 chunks:
@@ -1480,7 +2262,9 @@ This plan implements git-worktree-tui in 7 chunks:
 3. **Git branch/status operations** - List branches, get status
 4. **TUI app setup** - Main model, list view, styles
 5. **TUI modals** - Delete confirmation
+5.5. **Additional modals** - Create modal, cleanup modal, clipboard
 6. **CLI integration** - Cobra entry point, repo detection
+6.5. **Concurrency and safety** - Timeout, version check, concurrent status
 7. **Testing and polish** - README, integration tests
 
-Each task is bite-sized (2-5 minutes), follows TDD, and includes commits. Total estimated time: 2-3 hours.
+Each task is bite-sized (2-5 minutes), follows TDD, and includes commits. Total estimated time: 3-4 hours.
