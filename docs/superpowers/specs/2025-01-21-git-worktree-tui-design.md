@@ -43,21 +43,48 @@ git-worktree-tui/
 - **tui/** - Bubble Tea model/view/update, presentation only
 - **model/** - Shared data structures used by both layers
 
+### Repository Root Detection
+
+- Tool accepts optional `repo-path` CLI argument (defaults to current working directory)
+- If `cwd` is not a git repo, traverse upward through parent directories to find `.git`
+- If no `.git` found in any parent, exit with error: "Not a git repository"
+- If run from a subdirectory of a repo, operate on that repo (not an error)
+- Store detected repo root in application state for all git operations
+
+### Git Command Timeout Strategy
+
+- All git commands have 10s timeout (configurable via environment variable `GIT_WORKTREE_TUI_TIMEOUT`)
+- On timeout: kill process, show "Command timed out" in status bar, allow retry with `r`
+- Background status fetches: 5s timeout per worktree
+- Failed/timed-out status: display `?` instead of dirty/clean indicators
+- User can refresh (`r`) to retry failed operations
+
+### Concurrency Safety
+
+- Each goroutine for status fetch sends result to a channel: `chan StatusResult`
+- `StatusResult` contains either `WorktreeStatus` or `error`
+- Main loop collects results with `select` + timeout (5s per worktree max)
+- If worktree disappears mid-fetch (error from git), silently ignore result
+- No shared mutable state between goroutines - results merged in main thread only
+
 ## Data Model
 
 ### Worktree Structure
 
 ```go
 type Worktree struct {
-    Path      string           // Full path to worktree
-    Branch    string           // Branch name (e.g., "main", "feature/foo")
+    Path      string           // Full path to worktree (primary identifier)
+    Branch    string           // Branch name (e.g., "main", "feature/foo"), or "(detached)" if HEAD detached
     Commit    string           // HEAD commit SHA
     IsMain    bool             // Whether this is the main worktree (origin repo)
     IsLocked  bool             // Whether worktree is locked
-    IsBare    bool             // Whether this is a bare worktree
+    IsBare    bool             // Whether this is a bare worktree (no working directory)
+    Detached  bool             // Whether HEAD is detached (no branch checked out)
     Status    *WorktreeStatus  // Optional, loaded on demand
 }
 ```
+
+**Note:** Path is the primary identifier. Moving a worktree manually breaks UI state until refresh.
 
 ### WorktreeStatus Structure
 
@@ -107,12 +134,14 @@ type WorktreeStatus struct {
 | Key | Action |
 |-----|--------|
 | `↑/↓` or `j/k` | Navigate worktree list |
-| `Enter` | Switch to selected worktree (cd to it) |
+| `Enter` | Show full path for selected worktree (copy to clipboard if possible) |
 | `a` | New worktree (opens modal) |
 | `d` | Delete selected worktree (with confirmation) |
 | `c` | Cleanup - delete worktrees for non-existent branches |
 | `r` | Refresh - reload list and statuses |
 | `q` / `Ctrl+C` | Quit |
+
+**Note:** "Switch" action removed - user can see the path and `cd` manually. TUI cannot change parent shell's working directory.
 
 ### Create Worktree Modal
 
@@ -128,6 +157,12 @@ type WorktreeStatus struct {
 │            [Create]          [Cancel]                     │
 └───────────────────────────────────────────────────────────┘
 ```
+
+**Path Auto-Generation Logic:**
+- Base directory = parent of main worktree (git repo root's parent)
+- Path pattern = `{repo-root-parent}/{repo-name}-{branch-name-with-slashes-as-dashes}`
+- Example: repo at `/Users/dev/myproject`, branch `feature/auth` → `/Users/dev/myproject-feature-auth`
+- User can edit path manually in the modal before confirming
 
 ### Delete Confirmation Modal
 
@@ -146,30 +181,60 @@ type WorktreeStatus struct {
 
 ### Visual Indicators
 
-- `●` green - clean worktree
-- `●` yellow - dirty (uncommitted changes)
-- `→` cyan - currently selected (highlight)
-- `🔒` - locked worktree
-- `↑N ↓M` - ahead/behind from upstream
-- Gray - worktree without upstream
+- `●` green - clean worktree (git status --porcelain=v2 returns empty)
+- `●` yellow - dirty (non-empty output from git status --porcelain=v2)
+- `→` cyan - currently selected/highlighted in list
+- `🔒` - locked worktree (displayed as prefix)
+- `↑N ↓M` - ahead/behind from upstream (only if upstream configured)
+- `(bare)` - bare worktree suffix (no working directory, cannot have status)
+- `(detached)` - detached HEAD state (no branch checked out)
+- Gray text - worktree without upstream or status fetch failed
+- `?` - status unknown (fetch failed or timed out)
+
+**Implementation:** Use Lipgloss-styled text, not emoji (better cross-platform compatibility). Symbols like `●` and `🔒` are Unicode characters rendered via terminal font.
 
 ## Data Flow
 
 ### Startup Sequence
 
-1. Run `git worktree list --porcelain` in main repo directory
-2. Parse output → `[]Worktree`
-3. For each worktree: run `git status --porcelain=v2` in background (goroutine)
-4. Update model with `WorktreeStatus`
-5. Render list
+1. Detect repository root (traverse upward from cwd to find .git)
+2. Run `git worktree list --porcelain` in main repo directory
+3. Parse output → `[]Worktree`
+4. For each worktree: spawn goroutine to run `git status --porcelain=v2` with 5s timeout
+5. Collect results via channel with timeout handling
+6. Update model with `WorktreeStatus` (or mark as `?` if failed/timed out)
+7. Render list
 
 ### Actions
 
 - **Add:** Modal → validation → `git worktree add <path> <branch>` → refresh list
 - **Delete:** Confirmation → `git worktree remove <path>` → refresh list
-- **Cleanup:** `git worktree prune` + iterate list → prompt per non-existent branch → remove
-- **Switch:** `cd <worktree path>` (information only, not actual cd from TUI)
+- **Cleanup:** See detailed flow below
 - **Refresh:** Reload list + statuses
+
+### Cleanup Flow (Detailed)
+
+1. User presses `c`
+2. Tool runs `git branch --list` to get all local branches
+3. Compare branch list against worktree list
+4. Show modal: "Worktrees with missing branches:" + list of affected worktrees
+5. User can select which to remove (multi-select with space, or "remove all")
+6. For each selected worktree:
+   - If dirty → show warning, require explicit confirmation
+   - If locked → skip, show info "locked, skipping"
+   - Otherwise → `git worktree remove <path>`
+7. Refresh list after cleanup completes
+
+### Modal Keyboard Navigation
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Next field |
+| `Shift+Tab` | Previous field |
+| `Enter` | Confirm (Create/Delete) or submit form |
+| `Escape` | Cancel modal |
+| `↑/↓` | Navigate dropdown options or list items |
+| `Space` | Toggle checkbox or select item in multi-select |
 
 ## Error Handling
 
@@ -180,8 +245,13 @@ type WorktreeStatus struct {
 | Not in a git repo | Error on startup: "Not a git repository", exit 1 |
 | Git version < 2.39 | Warning on startup, but allow to run (degraded) |
 | Branch already exists on create | Error in modal: "Branch already exists" |
+| Path already exists on create | Error in modal: "Directory already exists" |
+| Permission denied (create/delete) | Error: "Cannot create/remove directory: permission denied" |
+| Disk full | Error: "Cannot create worktree: no space left on device" |
+| Path exists but is a file (not dir) | Error: "Path exists but is not a directory" |
 | Worktree has uncommitted changes on delete | Warning in confirmation modal (red text) |
 | Git command fails | Show stderr in status bar at bottom (5s timeout) |
+| Git command times out | Show "Command timed out" in status bar, allow retry with `r` |
 | Worktree locked on delete | Block action, show info: "Worktree is locked, unlock first" |
 
 ### Error Handling Pattern
