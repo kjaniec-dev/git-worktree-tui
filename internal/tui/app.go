@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -157,6 +158,37 @@ func (m Model) loadWorktrees() tea.Msg {
 	if err != nil {
 		return errMsg(err.Error())
 	}
+
+	// Load status concurrently
+	type result struct {
+		index  int
+		status *model.WorktreeStatus
+		err    error
+	}
+
+	resultChan := make(chan result, len(worktrees))
+
+	for i, wt := range worktrees {
+		go func(idx int, path string) {
+			status, err := m.git.GetWorktreeStatus(path)
+			resultChan <- result{index: idx, status: status, err: err}
+		}(i, wt.Path)
+	}
+
+	// Collect results with timeout
+	for i := 0; i < len(worktrees); i++ {
+		select {
+		case res := <-resultChan:
+			if res.err == nil {
+				worktrees[res.index].Status = res.status
+			}
+			// If error, status remains nil (shows as "?")
+		case <-time.After(5 * time.Second):
+			// Timeout - remaining statuses will be nil
+			return worktreesLoadedMsg{worktrees: worktrees}
+		}
+	}
+
 	return worktreesLoadedMsg{worktrees: worktrees}
 }
 
