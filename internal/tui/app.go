@@ -27,13 +27,33 @@ type Model struct {
 	errMsg    string
 	width     int
 	height    int
+	create    createModel
+	cleanup   cleanupModel
+}
+
+// cleanupModel is a placeholder until cleanup.go is implemented
+type cleanupModel struct {
+	staleWorktrees []int
+	selected       []bool
+	currentIndex   int
 }
 
 func NewModel(gitService *git.GitService) Model {
+	branches, _ := gitService.ListBranches()
+	baseBranch := "main"
+	if len(branches) > 0 {
+		baseBranch = branches[0]
+	}
+
 	return Model{
 		git:      gitService,
 		selected: 0,
 		mode:     modeList,
+		create: createModel{
+			branches:     branches,
+			baseBranch:   baseBranch,
+			createBranch: true,
+		},
 	}
 }
 
@@ -47,6 +67,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modeDelete:
 			return m.handleDeleteKeyPress(msg)
+		case modeCreate:
+			return m.handleCreateKeyPress(msg)
 		default:
 			return m.handleKeyPress(msg)
 		}
@@ -68,6 +90,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	if m.mode == modeDelete {
 		return m.viewDeleteModal()
+	}
+	if m.mode == modeCreate {
+		return m.viewCreateModal()
 	}
 
 	if len(m.worktrees) == 0 {
@@ -157,6 +182,9 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.worktrees) > 0 && !m.worktrees[m.selected].IsMain {
 			m.mode = modeDelete
 		}
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
+		m.mode = modeCreate
 		return m, nil
 	}
 	return m, nil
