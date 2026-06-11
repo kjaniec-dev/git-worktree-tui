@@ -189,6 +189,12 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cleanup.currentIndex = 0
 		m.mode = modeCleanup
 		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+		if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
+			path := m.worktrees[m.selected].Path
+			m.errMsg = fmt.Sprintf("Path: %s", path)
+		}
+		return m, nil
 	}
 	return m, nil
 }
