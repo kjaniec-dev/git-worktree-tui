@@ -44,7 +44,12 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		return m.handleKeyPress(msg)
+		switch m.mode {
+		case modeDelete:
+			return m.handleDeleteKeyPress(msg)
+		default:
+			return m.handleKeyPress(msg)
+		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -61,6 +66,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.mode == modeDelete {
+		return m.viewDeleteModal()
+	}
+
 	if len(m.worktrees) == 0 {
 		return "No worktrees found. Press 'q' to quit."
 	}
@@ -144,6 +153,11 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
 		return m, m.loadWorktrees
+	case key.Matches(msg, key.NewBinding(key.WithKeys("d"))):
+		if len(m.worktrees) > 0 && !m.worktrees[m.selected].IsMain {
+			m.mode = modeDelete
+		}
+		return m, nil
 	}
 	return m, nil
 }
