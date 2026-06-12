@@ -61,6 +61,10 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			wt := m.worktrees[idx]
 
+			if wt.IsMain {
+				continue
+			}
+
 			if wt.IsLocked {
 				continue
 			}

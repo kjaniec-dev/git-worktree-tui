@@ -74,6 +74,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case worktreesLoadedMsg:
 		m.worktrees = msg.worktrees
 		m.errMsg = ""
+		if m.selected >= len(m.worktrees) {
+			m.selected = len(m.worktrees) - 1
+		}
+		if m.selected < 0 {
+			m.selected = 0
+		}
 		return m, nil
 	case errMsg:
 		m.errMsg = string(msg)
@@ -113,6 +119,8 @@ func (m Model) View() string {
 		status := "●"
 		if wt.IsLocked {
 			status = "🔒"
+		} else if wt.IsMain {
+			status = "★"
 		} else if wt.Status != nil && wt.Status.IsDirty {
 			status = "●"
 		}
@@ -128,7 +136,12 @@ func (m Model) View() string {
 
 		b.WriteString(line)
 		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("    %s • %s", wt.Commit[:7], wt.Path))
+		
+		commitDisplay := wt.Commit
+		if len(commitDisplay) > 7 {
+			commitDisplay = commitDisplay[:7]
+		}
+		b.WriteString(fmt.Sprintf("    %s • %s", commitDisplay, wt.Path))
 		b.WriteString("\n\n")
 	}
 
@@ -210,7 +223,12 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "r":
 			return m, m.loadWorktrees
 		case "d":
-			if len(m.worktrees) > 0 && !m.worktrees[m.selected].IsMain {
+			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
+				wt := m.worktrees[m.selected]
+				if wt.IsMain {
+					m.errMsg = "Cannot delete main worktree"
+					return m, nil
+				}
 				m.mode = modeDelete
 			}
 			return m, nil
