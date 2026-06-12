@@ -54,7 +54,30 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		return m, nil
 	case tea.KeyEnter:
-		return m, m.cleanupWorktrees
+		for i, idx := range m.cleanup.staleWorktrees {
+			if !m.cleanup.selected[i] {
+				continue
+			}
+
+			wt := m.worktrees[idx]
+
+			if wt.IsLocked {
+				continue
+			}
+
+			if wt.Status != nil && wt.Status.IsDirty {
+				continue
+			}
+
+			err := m.git.RemoveWorktree(wt.Path)
+			if err != nil {
+				m.errMsg = fmt.Sprintf("Failed to remove %s: %v", wt.Path, err)
+				return m, nil
+			}
+		}
+
+		m.mode = modeList
+		return m, m.loadWorktrees
 	case tea.KeySpace:
 		if len(m.cleanup.selected) > 0 {
 			m.cleanup.selected[m.cleanup.currentIndex] = !m.cleanup.selected[m.cleanup.currentIndex]
@@ -87,32 +110,6 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
-}
-
-func (m Model) cleanupWorktrees() tea.Msg {
-	for i, idx := range m.cleanup.staleWorktrees {
-		if !m.cleanup.selected[i] {
-			continue
-		}
-
-		wt := m.worktrees[idx]
-
-		if wt.IsLocked {
-			continue
-		}
-
-		if wt.Status != nil && wt.Status.IsDirty {
-			continue
-		}
-
-		err := m.git.RemoveWorktree(wt.Path)
-		if err != nil {
-			return errMsg(fmt.Sprintf("Failed to remove %s: %v", wt.Path, err))
-		}
-	}
-
-	m.mode = modeList
-	return worktreesLoadedMsg{worktrees: nil}
 }
 
 func (m *Model) findStaleWorktrees() {

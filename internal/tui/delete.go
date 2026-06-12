@@ -38,7 +38,31 @@ func (m Model) handleDeleteKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyRunes:
 		switch msg.String() {
 		case "y":
-			return m, m.deleteWorktree
+			if m.selected >= len(m.worktrees) {
+				m.errMsg = "No worktree selected"
+				return m, nil
+			}
+
+			wt := m.worktrees[m.selected]
+
+			if wt.IsMain {
+				m.errMsg = "Cannot delete main worktree"
+				return m, nil
+			}
+
+			if wt.IsLocked {
+				m.errMsg = "Worktree is locked, unlock first"
+				return m, nil
+			}
+
+			err := m.git.RemoveWorktree(wt.Path)
+			if err != nil {
+				m.errMsg = err.Error()
+				return m, nil
+			}
+
+			m.mode = modeList
+			return m, m.loadWorktrees
 		case "n":
 			m.mode = modeList
 			return m, nil
@@ -48,27 +72,4 @@ func (m Model) handleDeleteKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
-}
-
-func (m Model) deleteWorktree() tea.Msg {
-	if m.selected >= len(m.worktrees) {
-		return errMsg("No worktree selected")
-	}
-
-	wt := m.worktrees[m.selected]
-
-	if wt.IsMain {
-		return errMsg("Cannot delete main worktree")
-	}
-
-	if wt.IsLocked {
-		return errMsg("Worktree is locked, unlock first")
-	}
-
-	err := m.git.RemoveWorktree(wt.Path)
-	if err != nil {
-		return errMsg(err.Error())
-	}
-
-	return worktreesLoadedMsg{worktrees: nil} // Trigger reload
 }
