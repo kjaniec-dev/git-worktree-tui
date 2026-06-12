@@ -128,19 +128,16 @@ func (g *GitService) AddWorktree(path, branch, base string, createBranch bool) e
 		return fmt.Errorf("failed to create directory %s: %w", parentDir, err)
 	}
 
+	branchExists, _ := g.BranchExists(branch)
+
 	var args []string
 	args = append(args, "worktree", "add")
 
-	if createBranch {
+	if createBranch && !branchExists {
 		args = append(args, "-b", branch)
-	}
-
-	args = append(args, path)
-
-	if createBranch {
-		args = append(args, base)
+		args = append(args, path, base)
 	} else {
-		args = append(args, branch)
+		args = append(args, path, branch)
 	}
 
 	output, err := g.runGitCommand(args...)
@@ -148,7 +145,7 @@ func (g *GitService) AddWorktree(path, branch, base string, createBranch bool) e
 		return fmt.Errorf("failed to add worktree: %w", err)
 	}
 
-	_ = output // suppress unused warning
+	_ = output
 	return nil
 }
 
