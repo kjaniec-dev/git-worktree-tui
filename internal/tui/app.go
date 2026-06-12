@@ -36,6 +36,12 @@ func NewModel(gitService *git.GitService) Model {
 	baseBranch := "main"
 	if len(branches) > 0 {
 		baseBranch = branches[0]
+		for _, b := range branches {
+			if b == "main" || b == "master" {
+				baseBranch = b
+				break
+			}
+		}
 	}
 
 	return Model{
