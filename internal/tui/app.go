@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/model"
@@ -193,40 +192,45 @@ func (m Model) loadWorktrees() tea.Msg {
 }
 
 func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
-		return m, tea.Quit
-	case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
-		if m.selected > 0 {
-			m.selected--
+	switch msg.Type {
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "q":
+			return m, tea.Quit
+		case "up", "k":
+			if m.selected > 0 {
+				m.selected--
+			}
+			return m, nil
+		case "down", "j":
+			if m.selected < len(m.worktrees)-1 {
+				m.selected++
+			}
+			return m, nil
+		case "r":
+			return m, m.loadWorktrees
+		case "d":
+			if len(m.worktrees) > 0 && !m.worktrees[m.selected].IsMain {
+				m.mode = modeDelete
+			}
+			return m, nil
+		case "a":
+			m.mode = modeCreate
+			return m, nil
+		case "c":
+			m.findStaleWorktrees()
+			m.cleanup.currentIndex = 0
+			m.mode = modeCleanup
+			return m, nil
 		}
-		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
-		if m.selected < len(m.worktrees)-1 {
-			m.selected++
-		}
-		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
-		return m, m.loadWorktrees
-	case key.Matches(msg, key.NewBinding(key.WithKeys("d"))):
-		if len(m.worktrees) > 0 && !m.worktrees[m.selected].IsMain {
-			m.mode = modeDelete
-		}
-		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
-		m.mode = modeCreate
-		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
-		m.findStaleWorktrees()
-		m.cleanup.currentIndex = 0
-		m.mode = modeCleanup
-		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+	case tea.KeyEnter:
 		if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
 			path := m.worktrees[m.selected].Path
 			m.errMsg = fmt.Sprintf("Path: %s", path)
 		}
 		return m, nil
+	case tea.KeyCtrlC:
+		return m, tea.Quit
 	}
 	return m, nil
 }

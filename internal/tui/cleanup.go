@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -50,39 +49,42 @@ func (m Model) viewCleanupModal() string {
 }
 
 func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, key.NewBinding(key.WithKeys("escape"))):
+	switch msg.Type {
+	case tea.KeyEscape:
 		m.mode = modeList
 		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
-		if m.cleanup.currentIndex > 0 {
-			m.cleanup.currentIndex--
-		}
-		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
-		if m.cleanup.currentIndex < len(m.cleanup.staleWorktrees)-1 {
-			m.cleanup.currentIndex++
-		}
-		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("space"))):
+	case tea.KeyEnter:
+		return m, m.cleanupWorktrees
+	case tea.KeySpace:
 		if len(m.cleanup.selected) > 0 {
 			m.cleanup.selected[m.cleanup.currentIndex] = !m.cleanup.selected[m.cleanup.currentIndex]
 		}
 		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
-		allSelected := true
-		for _, s := range m.cleanup.selected {
-			if !s {
-				allSelected = false
-				break
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "up", "k":
+			if m.cleanup.currentIndex > 0 {
+				m.cleanup.currentIndex--
 			}
+			return m, nil
+		case "down", "j":
+			if m.cleanup.currentIndex < len(m.cleanup.staleWorktrees)-1 {
+				m.cleanup.currentIndex++
+			}
+			return m, nil
+		case "a":
+			allSelected := true
+			for _, s := range m.cleanup.selected {
+				if !s {
+					allSelected = false
+					break
+				}
+			}
+			for i := range m.cleanup.selected {
+				m.cleanup.selected[i] = !allSelected
+			}
+			return m, nil
 		}
-		for i := range m.cleanup.selected {
-			m.cleanup.selected[i] = !allSelected
-		}
-		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
-		return m, m.cleanupWorktrees
 	}
 	return m, nil
 }

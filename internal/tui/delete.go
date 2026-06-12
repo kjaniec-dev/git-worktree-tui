@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -35,10 +34,16 @@ func (m Model) viewDeleteModal() string {
 }
 
 func (m Model) handleDeleteKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, key.NewBinding(key.WithKeys("y"))):
-		return m, m.deleteWorktree
-	case key.Matches(msg, key.NewBinding(key.WithKeys("n", "escape"))):
+	switch msg.Type {
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "y":
+			return m, m.deleteWorktree
+		case "n":
+			m.mode = modeList
+			return m, nil
+		}
+	case tea.KeyEscape:
 		m.mode = modeList
 		return m, nil
 	}
