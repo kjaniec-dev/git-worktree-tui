@@ -85,14 +85,14 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyRunes:
 		switch msg.String() {
-		case "up", "k":
-			if m.cleanup.currentIndex > 0 {
-				m.cleanup.currentIndex--
-			}
-			return m, nil
-		case "down", "j":
+		case "j":
 			if m.cleanup.currentIndex < len(m.cleanup.staleWorktrees)-1 {
 				m.cleanup.currentIndex++
+			}
+			return m, nil
+		case "k":
+			if m.cleanup.currentIndex > 0 {
+				m.cleanup.currentIndex--
 			}
 			return m, nil
 		case "a":
@@ -108,6 +108,16 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+	case tea.KeyDown:
+		if m.cleanup.currentIndex < len(m.cleanup.staleWorktrees)-1 {
+			m.cleanup.currentIndex++
+		}
+		return m, nil
+	case tea.KeyUp:
+		if m.cleanup.currentIndex > 0 {
+			m.cleanup.currentIndex--
+		}
+		return m, nil
 	}
 	return m, nil
 }

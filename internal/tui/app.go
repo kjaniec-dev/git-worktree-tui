@@ -197,14 +197,14 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q":
 			return m, tea.Quit
-		case "up", "k":
-			if m.selected > 0 {
-				m.selected--
-			}
-			return m, nil
-		case "down", "j":
+		case "j":
 			if m.selected < len(m.worktrees)-1 {
 				m.selected++
+			}
+			return m, nil
+		case "k":
+			if m.selected > 0 {
+				m.selected--
 			}
 			return m, nil
 		case "r":
@@ -223,6 +223,16 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeCleanup
 			return m, nil
 		}
+	case tea.KeyDown:
+		if m.selected < len(m.worktrees)-1 {
+			m.selected++
+		}
+		return m, nil
+	case tea.KeyUp:
+		if m.selected > 0 {
+			m.selected--
+		}
+		return m, nil
 	case tea.KeyEnter:
 		if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
 			path := m.worktrees[m.selected].Path
