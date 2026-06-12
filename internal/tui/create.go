@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -58,40 +57,44 @@ func (m Model) viewCreateModal() string {
 }
 
 func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+	switch msg.Type {
+	case tea.KeyTab:
 		m.create.currentField = (m.create.currentField + 1) % 3
 		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("shift+tab"))):
+	case tea.KeyShiftTab:
 		m.create.currentField = (m.create.currentField - 1 + 3) % 3
 		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("escape"))):
+	case tea.KeyEscape:
 		m.mode = modeList
 		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+	case tea.KeyEnter:
 		return m, m.createWorktree
-	case key.Matches(msg, key.NewBinding(key.WithKeys("up", "down"))):
+	case tea.KeyUp:
 		if m.create.currentField == fieldBase && len(m.create.branches) > 0 {
-			if msg.String() == "up" && m.create.baseIndex > 0 {
+			if m.create.baseIndex > 0 {
 				m.create.baseIndex--
 				m.create.baseBranch = m.create.branches[m.create.baseIndex]
-			} else if msg.String() == "down" && m.create.baseIndex < len(m.create.branches)-1 {
+			}
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.create.currentField == fieldBase && len(m.create.branches) > 0 {
+			if m.create.baseIndex < len(m.create.branches)-1 {
 				m.create.baseIndex++
 				m.create.baseBranch = m.create.branches[m.create.baseIndex]
 			}
 		}
 		return m, nil
-	}
-
-	// Handle text input for branch name
-	if m.create.currentField == fieldBranch {
-		if msg.Type == tea.KeyRunes {
-			m.create.branchName += string(msg.Runes)
-		} else if msg.Type == tea.KeyBackspace {
-			if len(m.create.branchName) > 0 {
-				m.create.branchName = m.create.branchName[:len(m.create.branchName)-1]
-			}
+	case tea.KeyBackspace:
+		if m.create.currentField == fieldBranch && len(m.create.branchName) > 0 {
+			m.create.branchName = m.create.branchName[:len(m.create.branchName)-1]
 		}
+		return m, nil
+	case tea.KeyRunes:
+		if m.create.currentField == fieldBranch {
+			m.create.branchName += string(msg.Runes)
+		}
+		return m, nil
 	}
 
 	return m, nil
