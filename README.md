@@ -5,7 +5,7 @@ A terminal UI for managing git worktrees.
 ## Features
 
 - List all worktrees with status (clean/dirty, ahead/behind)
-- Create new worktrees with branch selection
+- Create new worktrees inside repo at `.worktrees/<branch-name>`
 - Delete worktrees with confirmation
 - Cleanup stale worktrees
 - Fast, keyboard-driven interface
@@ -23,6 +23,8 @@ Run from any git repository:
 ```bash
 git-worktree-tui
 ```
+
+Worktrees are created inside your repo at `.worktrees/<branch-name>` (e.g., `.worktrees/feature-auth`). This directory is automatically added to `.gitignore`.
 
 ### Keybindings
 
