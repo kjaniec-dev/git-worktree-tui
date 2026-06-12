@@ -89,7 +89,18 @@ func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		return m, nil
 	case tea.KeyEnter:
-		return m, m.createWorktree
+		if m.create.branchName == "" {
+			m.create.errMsg = "Branch name is required"
+			return m, nil
+		}
+		path := generateWorktreePath(m.git.RepoRoot, m.create.branchName)
+		err := m.git.AddWorktree(path, m.create.branchName, m.create.baseBranch, m.create.createBranch)
+		if err != nil {
+			m.create.errMsg = err.Error()
+			return m, nil
+		}
+		m.mode = modeList
+		return m, m.loadWorktrees
 	case tea.KeyUp:
 		if m.create.currentField == fieldBase && len(m.create.branches) > 0 {
 			if m.create.baseIndex > 0 {
@@ -124,21 +135,4 @@ func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
-}
-
-func (m Model) createWorktree() tea.Msg {
-	if m.create.branchName == "" {
-		m.create.errMsg = "Branch name is required"
-		return nil
-	}
-
-	path := generateWorktreePath(m.git.RepoRoot, m.create.branchName)
-	err := m.git.AddWorktree(path, m.create.branchName, m.create.baseBranch, m.create.createBranch)
-	if err != nil {
-		m.create.errMsg = err.Error()
-		return nil
-	}
-
-	m.mode = modeList
-	return worktreesLoadedMsg{worktrees: nil} // Trigger reload
 }
