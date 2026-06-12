@@ -24,9 +24,9 @@ func TestPathAutoGeneration(t *testing.T) {
 		branch   string
 		expected string
 	}{
-		{"/Users/dev/myproject", "feature/auth", "/Users/dev/myproject-feature-auth"},
-		{"/Users/dev/myproject", "main", "/Users/dev/myproject-main"},
-		{"/Users/dev/myproject", "hotfix/critical/bug", "/Users/dev/myproject-hotfix-critical-bug"},
+		{"/Users/dev/myproject", "feature/auth", "/Users/dev/myproject/.worktrees/feature-auth"},
+		{"/Users/dev/myproject", "main", "/Users/dev/myproject/.worktrees/main"},
+		{"/Users/dev/myproject", "hotfix/critical/bug", "/Users/dev/myproject/.worktrees/hotfix-critical-bug"},
 	}
 
 	for _, tt := range tests {

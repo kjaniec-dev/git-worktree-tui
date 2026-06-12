@@ -27,11 +27,8 @@ type createModel struct {
 }
 
 func generateWorktreePath(repoRoot, branch string) string {
-	parent := filepath.Dir(repoRoot)
-	repoName := filepath.Base(repoRoot)
-	// Replace slashes with dashes
 	safeBranch := strings.ReplaceAll(branch, "/", "-")
-	return filepath.Join(parent, fmt.Sprintf("%s-%s", repoName, safeBranch))
+	return filepath.Join(repoRoot, ".worktrees", safeBranch)
 }
 
 func (m Model) viewCreateModal() string {
