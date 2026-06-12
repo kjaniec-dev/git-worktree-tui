@@ -39,9 +39,30 @@ func (m Model) viewCreateModal() string {
 	b.WriteString(titleStyle.Render("Create Worktree"))
 	b.WriteString("\n\n")
 
-	b.WriteString(fmt.Sprintf("Branch name: [%s]\n", m.create.branchName))
-	b.WriteString(fmt.Sprintf("Base: [%s]\n", m.create.baseBranch))
-	b.WriteString(fmt.Sprintf("☐ Create new branch from base: %v\n\n", m.create.createBranch))
+	branchLabel := fmt.Sprintf("Branch name: [%s]", m.create.branchName)
+	baseLabel := fmt.Sprintf("Base: [%s]", m.create.baseBranch)
+	checkboxLabel := fmt.Sprintf("☐ Create new branch from base: %v", m.create.createBranch)
+
+	if m.create.currentField == fieldBranch {
+		b.WriteString(selectedStyle.Render("→ " + branchLabel))
+	} else {
+		b.WriteString("  " + branchLabel)
+	}
+	b.WriteString("\n")
+
+	if m.create.currentField == fieldBase {
+		b.WriteString(selectedStyle.Render("→ " + baseLabel))
+	} else {
+		b.WriteString("  " + baseLabel)
+	}
+	b.WriteString("\n")
+
+	if m.create.currentField == fieldCreateBranch {
+		b.WriteString(selectedStyle.Render("→ " + checkboxLabel))
+	} else {
+		b.WriteString("  " + checkboxLabel)
+	}
+	b.WriteString("\n\n")
 
 	path := generateWorktreePath(m.git.RepoRoot, m.create.branchName)
 	b.WriteString(fmt.Sprintf("Path: %s (auto)\n\n", path))
@@ -88,6 +109,11 @@ func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyBackspace:
 		if m.create.currentField == fieldBranch && len(m.create.branchName) > 0 {
 			m.create.branchName = m.create.branchName[:len(m.create.branchName)-1]
+		}
+		return m, nil
+	case tea.KeySpace:
+		if m.create.currentField == fieldCreateBranch {
+			m.create.createBranch = !m.create.createBranch
 		}
 		return m, nil
 	case tea.KeyRunes:
