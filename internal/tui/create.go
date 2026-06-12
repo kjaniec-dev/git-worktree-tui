@@ -14,6 +14,7 @@ const (
 	fieldBranch createField = iota
 	fieldBase
 	fieldCreateBranch
+	fieldLocation
 )
 
 type createModel struct {
@@ -24,10 +25,16 @@ type createModel struct {
 	branches      []string
 	baseIndex     int
 	errMsg        string
+	location      string // "inside" or "outside"
 }
 
-func generateWorktreePath(repoRoot, branch string) string {
+func generateWorktreePath(repoRoot, branch, location string) string {
 	safeBranch := strings.ReplaceAll(branch, "/", "-")
+	if location == "outside" {
+		parent := filepath.Dir(repoRoot)
+		repoName := filepath.Base(repoRoot)
+		return filepath.Join(parent, fmt.Sprintf("%s-%s", repoName, safeBranch))
+	}
 	return filepath.Join(repoRoot, ".worktrees", safeBranch)
 }
 
@@ -39,6 +46,7 @@ func (m Model) viewCreateModal() string {
 	branchLabel := fmt.Sprintf("Branch name: [%s]", m.create.branchName)
 	baseLabel := fmt.Sprintf("Base: [%s]", m.create.baseBranch)
 	checkboxLabel := fmt.Sprintf("☐ Create new branch from base: %v", m.create.createBranch)
+	locationLabel := fmt.Sprintf("Location: [%s]", m.create.location)
 
 	if m.create.currentField == fieldBranch {
 		b.WriteString(selectedStyle.Render("→ " + branchLabel))
@@ -59,9 +67,16 @@ func (m Model) viewCreateModal() string {
 	} else {
 		b.WriteString("  " + checkboxLabel)
 	}
+	b.WriteString("\n")
+
+	if m.create.currentField == fieldLocation {
+		b.WriteString(selectedStyle.Render("→ " + locationLabel))
+	} else {
+		b.WriteString("  " + locationLabel)
+	}
 	b.WriteString("\n\n")
 
-	path := generateWorktreePath(m.git.RepoRoot, m.create.branchName)
+	path := generateWorktreePath(m.git.RepoRoot, m.create.branchName, m.create.location)
 	b.WriteString(fmt.Sprintf("Path: %s (auto)\n\n", path))
 
 	if m.create.errMsg != "" {
@@ -69,7 +84,7 @@ func (m Model) viewCreateModal() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(helpStyle.Render("[Tab] next field [↑/↓] select base [Enter] create [Esc] cancel"))
+	b.WriteString(helpStyle.Render("[Tab] next field [↑/↓] select base [l] toggle location [Enter] create [Esc] cancel"))
 
 	return b.String()
 }
@@ -77,10 +92,10 @@ func (m Model) viewCreateModal() string {
 func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyTab:
-		m.create.currentField = (m.create.currentField + 1) % 3
+		m.create.currentField = (m.create.currentField + 1) % 4
 		return m, nil
 	case tea.KeyShiftTab:
-		m.create.currentField = (m.create.currentField - 1 + 3) % 3
+		m.create.currentField = (m.create.currentField - 1 + 4) % 4
 		return m, nil
 	case tea.KeyEscape:
 		m.mode = modeList
@@ -90,7 +105,7 @@ func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.create.errMsg = "Branch name is required"
 			return m, nil
 		}
-		path := generateWorktreePath(m.git.RepoRoot, m.create.branchName)
+		path := generateWorktreePath(m.git.RepoRoot, m.create.branchName, m.create.location)
 		err := m.git.AddWorktree(path, m.create.branchName, m.create.baseBranch, m.create.createBranch)
 		if err != nil {
 			m.create.errMsg = err.Error()
@@ -131,6 +146,14 @@ func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.create.branchName += string(msg.Runes)
 		} else if m.create.currentField == fieldBase {
 			m.create.baseBranch += string(msg.Runes)
+		} else if m.create.currentField == fieldLocation {
+			if msg.String() == "l" {
+				if m.create.location == "inside" {
+					m.create.location = "outside"
+				} else {
+					m.create.location = "inside"
+				}
+			}
 		}
 		return m, nil
 	}

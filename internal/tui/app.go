@@ -52,6 +52,7 @@ func NewModel(gitService *git.GitService) Model {
 			branches:     branches,
 			baseBranch:   baseBranch,
 			createBranch: true,
+			location:     "inside",
 		},
 	}
 }
