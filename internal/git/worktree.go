@@ -3,7 +3,9 @@ package git
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -121,6 +123,11 @@ func (g *GitService) ListWorktrees() ([]model.Worktree, error) {
 
 // AddWorktree creates a new worktree
 func (g *GitService) AddWorktree(path, branch, base string, createBranch bool) error {
+	parentDir := filepath.Dir(path)
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", parentDir, err)
+	}
+
 	var args []string
 	args = append(args, "worktree", "add")
 
