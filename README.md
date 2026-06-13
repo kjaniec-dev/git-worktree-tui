@@ -22,10 +22,10 @@ If you don't have Go installed, you can build the binary using Docker:
 
 ```bash
 docker run --rm -v $(pwd):/app -w /app golang:1.26-alpine \
-  sh -c "CGO_ENABLED=0 go build -o git-worktree-tui"
+  sh -c "CGO_ENABLED=0 GOOS=$(uname -s | tr '[:upper:]' '[:lower:]') GOARCH=$(uname -m | sed 's/x86_64/amd64/') go build -o git-worktree-tui"
 ```
 
-This produces a native `git-worktree-tui` binary in your current directory — no Go installation needed. Run it with `./git-worktree-tui`.
+This cross-compiles a native binary for your OS and architecture — no Go installation needed. Run it with `./git-worktree-tui`.
 
 ## Usage
 
