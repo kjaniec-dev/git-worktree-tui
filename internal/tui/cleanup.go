@@ -73,7 +73,7 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				continue
 			}
 
-			err := m.git.RemoveWorktree(wt.Path)
+			err := m.git.RemoveWorktree(wt.Path, false)
 			if err != nil {
 				m.errMsg = fmt.Sprintf("Failed to remove %s: %v", wt.Path, err)
 				return m, nil

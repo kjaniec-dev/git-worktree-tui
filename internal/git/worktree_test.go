@@ -92,9 +92,11 @@ func TestAddWorktreeCommand(t *testing.T) {
 
 func TestRemoveWorktreeCommand(t *testing.T) {
 	g := NewGitService("/tmp/nonexistent-repo-12345")
-	err := g.RemoveWorktree("/tmp/nonexistent-worktree")
-	if err == nil {
-		t.Error("Expected error when worktree doesn't exist")
+	if err := g.RemoveWorktree("/tmp/nonexistent-worktree", false); err == nil {
+		t.Error("Expected error when worktree doesn't exist (force=false)")
+	}
+	if err := g.RemoveWorktree("/tmp/nonexistent-worktree", true); err == nil {
+		t.Error("Expected error when worktree doesn't exist (force=true)")
 	}
 }
 
@@ -108,6 +110,15 @@ func equalSlices(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestBuildRemoveArgs(t *testing.T) {
+	if got := buildRemoveArgs("/p", false); !equalSlices(got, []string{"worktree", "remove", "/p"}) {
+		t.Errorf("no-force = %v", got)
+	}
+	if got := buildRemoveArgs("/p", true); !equalSlices(got, []string{"worktree", "remove", "--force", "/p"}) {
+		t.Errorf("force = %v", got)
+	}
 }
 
 func TestBuildAddArgs(t *testing.T) {

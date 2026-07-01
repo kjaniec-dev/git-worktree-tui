@@ -167,14 +167,25 @@ func (g *GitService) AddWorktree(path, branch, base string, createBranch bool) e
 	return nil
 }
 
-// RemoveWorktree removes a worktree
-func (g *GitService) RemoveWorktree(path string) error {
-	output, err := g.runGitCommand("worktree", "remove", path)
+// buildRemoveArgs constructs `git worktree remove` args, including --force
+// when force is true.
+func buildRemoveArgs(path string, force bool) []string {
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	return append(args, path)
+}
+
+// RemoveWorktree removes a worktree. When force is true, passes --force so
+// git removes worktrees with untracked/modified files.
+func (g *GitService) RemoveWorktree(path string, force bool) error {
+	output, err := g.runGitCommand(buildRemoveArgs(path, force)...)
 	if err != nil {
 		return fmt.Errorf("failed to remove worktree %s: %w", path, err)
 	}
 
-	_ = output // suppress unused warning
+	_ = output
 	return nil
 }
 
