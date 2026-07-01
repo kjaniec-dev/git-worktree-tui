@@ -1,7 +1,10 @@
 package git
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 )
 
@@ -37,8 +40,23 @@ func (g *GitService) ListBranches() ([]string, error) {
 	return parseBranchList(string(output)), nil
 }
 
-// BranchExists checks if a branch exists
+// BranchExists reports whether a *local branch* named <branch> exists.
+// Tags and other refs do not count. A nonzero exit from rev-parse means
+// the branch does not exist (not an error). Real failures (timeout, git
+// missing) are surfaced as errors.
 func (g *GitService) BranchExists(branch string) (bool, error) {
-	_, err := g.runGitCommand("rev-parse", "--verify", branch)
-	return err == nil, nil
+	ctx, cancel := context.WithTimeout(context.Background(), g.Timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	cmd.Dir = g.RepoRoot
+
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return false, nil // branch not found
+		}
+		return false, fmt.Errorf("failed to verify branch %q: %w", branch, err)
+	}
+	return true, nil
 }
