@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/kjaniec-dev/git-worktree-tui/internal/model"
 )
 
 type cleanupModel struct {
@@ -126,6 +128,25 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// classifyStale returns the indices of worktrees that are stale: non-main,
+// non-locked, non-detached, non-dirty, and whose branch is not a local
+// branch in branchSet.
+func classifyStale(wts []model.Worktree, branchSet map[string]bool) []int {
+	var stale []int
+	for i, wt := range wts {
+		if wt.IsMain || wt.IsLocked || wt.Detached {
+			continue
+		}
+		if wt.Status != nil && wt.Status.IsDirty {
+			continue
+		}
+		if !branchSet[wt.Branch] {
+			stale = append(stale, i)
+		}
+	}
+	return stale
+}
+
 func (m *Model) findStaleWorktrees() {
 	branches, err := m.git.ListBranches()
 	if err != nil {
@@ -137,16 +158,6 @@ func (m *Model) findStaleWorktrees() {
 		branchSet[b] = true
 	}
 
-	m.cleanup.staleWorktrees = nil
-	m.cleanup.selected = nil
-
-	for i, wt := range m.worktrees {
-		if wt.IsMain {
-			continue
-		}
-		if !branchSet[wt.Branch] {
-			m.cleanup.staleWorktrees = append(m.cleanup.staleWorktrees, i)
-			m.cleanup.selected = append(m.cleanup.selected, false)
-		}
-	}
+	m.cleanup.staleWorktrees = classifyStale(m.worktrees, branchSet)
+	m.cleanup.selected = make([]bool, len(m.cleanup.staleWorktrees))
 }
