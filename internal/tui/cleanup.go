@@ -56,33 +56,32 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		return m, nil
 	case tea.KeyEnter:
+		if len(m.cleanup.staleWorktrees) == 0 {
+			m.mode = modeList
+			return m, m.loadWorktrees
+		}
+		var errs []string
 		for i, idx := range m.cleanup.staleWorktrees {
 			if !m.cleanup.selected[i] {
 				continue
 			}
-
 			wt := m.worktrees[idx]
-
-			if wt.IsMain {
+			if wt.IsMain || wt.IsLocked {
 				continue
 			}
-
-			if wt.IsLocked {
-				continue
-			}
-
 			if wt.Status != nil && wt.Status.IsDirty {
 				continue
 			}
-
-			err := m.git.RemoveWorktree(wt.Path, false)
-			if err != nil {
-				m.errMsg = fmt.Sprintf("Failed to remove %s: %v", wt.Path, err)
-				return m, nil
+			if err := m.git.RemoveWorktree(wt.Path, false); err != nil {
+				errs = append(errs, fmt.Sprintf("failed to remove %s: %v", wt.Path, err))
 			}
 		}
-
 		m.mode = modeList
+		if len(errs) > 0 {
+			m.errMsg = strings.Join(errs, "; ")
+		} else {
+			m.errMsg = ""
+		}
 		return m, m.loadWorktrees
 	case tea.KeySpace:
 		if len(m.cleanup.selected) > 0 {
