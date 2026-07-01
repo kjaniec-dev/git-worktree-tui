@@ -233,11 +233,17 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "q":
 			return m, tea.Quit
 		case "j":
+			if len(m.worktrees) == 0 {
+				return m, nil
+			}
 			if m.selected < len(m.worktrees)-1 {
 				m.selected++
 			}
 			return m, nil
 		case "k":
+			if len(m.worktrees) == 0 {
+				return m, nil
+			}
 			if m.selected > 0 {
 				m.selected--
 			}
@@ -265,11 +271,17 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case tea.KeyDown:
+		if len(m.worktrees) == 0 {
+			return m, nil
+		}
 		if m.selected < len(m.worktrees)-1 {
 			m.selected++
 		}
 		return m, nil
 	case tea.KeyUp:
+		if len(m.worktrees) == 0 {
+			return m, nil
+		}
 		if m.selected > 0 {
 			m.selected--
 		}

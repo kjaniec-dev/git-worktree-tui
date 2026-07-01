@@ -3,6 +3,7 @@ package tui
 import (
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
 )
 
@@ -45,5 +46,25 @@ func TestInitialBase(t *testing.T) {
 				t.Errorf("idx = %d, want %d", idx, tt.wantIdx)
 			}
 		})
+	}
+}
+
+func TestEmptyListNavigationNoOp(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"))
+	m.worktrees = nil
+	m.selected = 0
+	m.mode = modeList
+
+	for _, msg := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune{'j'}},
+		{Type: tea.KeyRunes, Runes: []rune{'k'}},
+		{Type: tea.KeyDown},
+		{Type: tea.KeyUp},
+	} {
+		out, _ := m.handleKeyPress(msg)
+		mm := out.(Model)
+		if mm.selected != 0 {
+			t.Errorf("after %v on empty list, selected = %d, want 0", msg, mm.selected)
+		}
 	}
 }
