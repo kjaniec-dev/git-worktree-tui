@@ -138,6 +138,24 @@ git commit -m "fix: BranchExists checks local branches only and surfaces real er
 
 - [ ] **Step 1: Write the failing tests** (append to `internal/git/worktree_test.go`)
 
+First, add a package-level test helper (used by this task's `TestBuildAddArgs` and by Task 4's `TestBuildRemoveArgs`):
+
+```go
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+```
+
+Then the test:
+
 ```go
 func TestBuildAddArgs(t *testing.T) {
 	tests := []struct {
@@ -174,18 +192,6 @@ func TestBuildAddArgs(t *testing.T) {
 			}
 		})
 	}
-}
-
-func equalSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 ```
 
@@ -421,8 +427,10 @@ Expected: PASS + build OK.
 
 ```bash
 git add internal/git/worktree.go internal/git/worktree_test.go internal/tui/delete.go internal/tui/cleanup.go
-git commit -m "fix: RemoveWorktree gains force param via buildRemoveArgs; update call sites"
+git commit -m "fix: RemoveWorktree gains force param via buildRemoveArgs; update all call sites"
 ```
+
+Note: `internal/tui/delete.go` and `internal/tui/cleanup.go` are modified with `force=false` placeholders now (dirty logic refined in Tasks 8 and 10). Staging them in this commit keeps the call-site signature updates atomic with the signature change — the build stays green at HEAD.
 
 ---
 
@@ -636,11 +644,13 @@ git commit -m "fix: create form Base field is selector-only (no free-text)"
 
 ---
 
-### Task 7: Create Enter with existing branch shows friendly error
+### Task 7: Create Enter with existing branch shows friendly error (regression guard)
 
 **Files:**
 - Modify: none (covered by Tasks 2-3); behavior test only
 - Test: `internal/tui/create_test.go`
+
+**Note on TDD framing:** This test is a **regression guard**, not failing-first TDD. Tasks 2-3 already fixed `AddWorktree` to return friendly errors, and `handleCreateKeyPress` already sets `m.create.errMsg = err.Error()` and returns without changing mode on error. The test passes immediately at Step 2 — there is no fail-step here. Its purpose is to lock in the happy-path-stays-in-create-mode behavior against future regressions.
 
 - [ ] **Step 1: Write the test** (append)
 
