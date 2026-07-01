@@ -28,7 +28,11 @@ func (m Model) viewDeleteModal() string {
 		b.WriteString("⚠ This will remove the worktree directory.\n\n")
 	}
 
-	b.WriteString(helpStyle.Render("[y]es [n]o"))
+	confirmHint := "[y]es [n]o"
+	if wt.Status != nil && wt.Status.IsDirty {
+		confirmHint = "[y] force-remove [n]o"
+	}
+	b.WriteString(helpStyle.Render(confirmHint))
 
 	return b.String()
 }
@@ -55,7 +59,8 @@ func (m Model) handleDeleteKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			err := m.git.RemoveWorktree(wt.Path, false)
+			force := wt.Status != nil && wt.Status.IsDirty
+		err := m.git.RemoveWorktree(wt.Path, force)
 			if err != nil {
 				m.errMsg = err.Error()
 				return m, nil

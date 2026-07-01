@@ -251,6 +251,7 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.errMsg = "Cannot delete main worktree"
 					return m, nil
 				}
+				m.errMsg = ""
 				m.mode = modeDelete
 			}
 			return m, nil
