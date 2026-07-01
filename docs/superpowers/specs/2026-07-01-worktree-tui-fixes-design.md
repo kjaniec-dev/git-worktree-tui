@@ -27,7 +27,9 @@ The worktree TUI has bugs in create, delete, and cleanup flows that make it fail
 
 ### A. Dirty worktree deletion — force on explicit confirm
 
-`RemoveWorktree(path string, force bool)` gains a `force` parameter. The TUI decides: a non-dirty worktree is removed normally; a dirty worktree is removed with `--force` **only** when the user confirms on a modal that explicitly says changes will be lost (option 2 per design approval).
+**Signature change (breaking):** `RemoveWorktree` changes from `RemoveWorktree(path string) error` to `RemoveWorktree(path string, force bool) error`. The single call site in `internal/tui/delete.go:58` must pass the `force` argument, and the existing `TestRemoveWorktreeCommand` in `internal/git/worktree_test.go` must be updated to the new signature (add a `force=false` variant and a `force=true` variant asserting the `--force` arg). No other callers exist.
+
+The TUI decides: a non-dirty worktree is removed normally; a dirty worktree is removed with `--force` **only** when the user confirms on a modal that explicitly says changes will be lost (option 2 per design approval).
 
 The delete modal already shows the dirty warning. The confirmation key (`y`) in that modal is the safety gate. When the worktree is dirty, the modal shows `[y] force-remove [n]o`; `y` calls `RemoveWorktree(path, true)`. When clean, the modal shows `[y]es [n]o`; `y` calls `RemoveWorktree(path, false)`.
 
@@ -41,12 +43,14 @@ git worktree remove [--force] <path>
 
 1. **Base selector sync.** In `NewModel`, after choosing `baseBranch`, set `createModel.baseIndex` to `indexOf(baseBranch, branches)` (0 when not found). This makes the displayed base and the ↑/↓ index agree.
 2. **Base field becomes selector-only.** Remove free-text/backspace handling for `fieldBase` in `handleCreateKeyPress`; ↑/↓ move `baseIndex` and set `baseBranch = branches[baseIndex]`. Branch-name field remains free-text. Prep for (B1) makes this consistent.
-3. **Explicit create-vs-checkout matrix in `AddWorktree`.** Replace the current `if createBranch && !branchExists` logic with four explicit cases, returning friendly errors *before* invoking git:
-   - `createBranch && branchExists` → return error: `branch '<name>' already exists; uncheck 'create new branch' to check it out`.
-   - `createBranch && !branchExists` → `git worktree add -b <branch> <path> <base>`.
-   - `!createBranch && branchExists` → `git worktree add <path> <branch>`.
-   - `!createBranch && !branchExists` → return error: `branch '<name>' does not exist; check 'create new branch' or select an existing branch`.
-4. **Path-collision pre-check.** Before invoking `git worktree add`, if the auto-generated path already exists (and is non-empty), return error: `path '<path>' already exists`. (`os.Stat`/`os.ReadDir`.)
+3. **Explicit create-vs-checkout matrix in `AddWorktree`.** Implementation steps:
+   - Replace `branchExists, _ := g.BranchExists(branch)` with `branchExists, err := g.BranchExists(branch)`; if `err != nil` return `fmt.Errorf("failed to check branch: %w", err)`. Do not discard the `BranchExists` error.
+   - Restructure the function into an explicit four-case `switch`/`if-else` **before** any `args` construction or `runGitCommand` call. Each case returns early:
+     - `createBranch && branchExists` → return error: `branch '<name>' already exists; uncheck 'create new branch' to check it out` (no git invocation).
+     - `!createBranch && !branchExists` → return error: `branch '<name>' does not exist; check 'create new branch' or select an existing branch` (no git invocation).
+     - `createBranch && !branchExists` → proceed to `git worktree add -b <branch> <path> <base>`.
+     - `!createBranch && branchExists` → proceed to `git worktree add <path> <branch>`.
+4. **Path-collision pre-check.** After the four-case matrix passes (immediately before the `runGitCommand`), call `os.Stat(path)`. If `err == nil` — the path exists as a directory or a file, regardless of contents — return the friendly error `path '<path>' already exists`. This is a plain existence check; git's own error handles any remaining edge cases (e.g., non-empty target during checkout). Do not inspect directory contents.
 5. **`BranchExists` → local-branch only.** Use `git rev-parse --verify --quiet refs/heads/<branch>` and treat non-zero exit as "does not exist as a local branch". Returns `(bool, error)` with the error surfaced (no discarded `_`).
 
 ### C. Delete flow
@@ -58,7 +62,7 @@ git worktree remove [--force] <path>
 
 1. **Exclude detached worktrees from the stale set.** In `findStaleWorktrees`, `continue` when `wt.Detached` is true.
 2. **Exclude dirty worktrees up front.** Move the dirty guard from the Enter handler into `findStaleWorktrees`: a worktree with `Status != nil && Status.IsDirty` is not stale-removable. Removed worktrees are those that are non-main, non-locked, non-dirty, and whose branch is not a local branch. The Enter handler no longer silently no-ops on dirty because such entries never appear.
-3. **Collect errors, don't abort the batch.** The Enter handler iterates all selected, attempts removal for each, accumulates any errors into a single message, then refreshes the list (`m.loadWorktrees`) regardless of partial failure. The accumulated message becomes `m.errMsg` (e.g. `failed to remove <path1>; failed to remove <path2>`). On full success `m.errMsg` is empty.
+3. **Collect errors, don't abort the batch.** The Enter handler iterates all selected, attempts removal for each, accumulates any errors into a single message, then refreshes the list (`m.loadWorktrees`) regardless of partial failure. The accumulated message becomes `m.errMsg` (e.g. `failed to remove <path1>; failed to remove <path2>`). On full success `m.errMsg` is empty. On full or partial completion, set `m.mode = modeList` and return `m, m.loadWorktrees`; the returned list view's error renderer (`internal/tui/app.go` lines 159-162, the `m.errMsg != ""` block) displays any accumulated error at the bottom of the list view.
 
 ### E. Safety / UX (small)
 
@@ -77,14 +81,20 @@ git worktree remove [--force] <path>
 - `internal/git` unit tests:
   - `BranchExists`: local branch → true; tag of same name → false; missing → false.
   - `AddWorktree`: create+exists → friendly error, no git invocation (assert via not executing); checkout+missing → friendly error; path collision → friendly error (using a temp repo).
-  - `RemoveWorktree(force)`: non-dirty normal; dry-run the `--force` arg construction (do not require a real dirty tree in unit tests; assert command args).
-- `internal/tui` tests:
-  - `NewModel` sets `baseIndex` to the index of `baseBranch` in `branches`.
-  - Create keypress: Base field ↑/↓ changes `baseIndex` and `baseBranch` consistently; Base field ignores typed runes (no append).
-  - Create keypress: pressing Enter with createBranch + existing branch shows the friendly error and does not change mode.
-  - Delete keypress: dirty worktree → `y` calls `RemoveWorktree(path, true)` (verify via a fake git service interface—if refactor needed, use a small interface so the TUI is testable without shelling out).
-  - Cleanup: `findStaleWorktrees` excludes detached and dirty; Enter handler removes all selected and refreshes even if one removal errors.
+  - `RemoveWorktree(force)`: update `TestRemoveWorktreeCommand` to the new signature; add a `force=true` case that asserts the constructed command contains `--force` and a `force=false` case that asserts it does not. Do not require a real dirty worktree in unit tests; assert on command args only.
+
+- `internal/tui` tests (no service-interface refactor — the TUI is not mock-injected; git-layer arg-assertion tests cover the force wiring, and the dirty-modal→force path is verified by manual/visual QA per the Verification section):
+  - `NewModel` sets `baseIndex` to the index of `baseBranch` in `branches` (construct a model with a known branch order, e.g. `["develop", "main", "feature-x"]`, and assert `baseIndex` equals the index of `main`).
+  - Create keypress: Base field ↑/↓ changes `baseIndex` and `baseBranch` consistently (`baseBranch == branches[baseIndex]` after each step); Base field ignores typed `KeyRunes` (no append, no backspace deletion).
+  - Create keypress: pressing Enter with `createBranch==true` and an existing branch sets the friendly error on `m.create.errMsg` and keeps `m.mode == modeCreate` (does not transition or call loadWorktrees).
 - Run the full existing test suite; ensure `go vet ./...` and `go build ./...` pass.
+
+### Manual / visual QA (not automated)
+
+Because the TUI is not mock-injected, the following are verified manually against a scratch git repo:
+- Delete modal: select a dirty worktree → modal shows "⚠ changes will be lost" and `[y] force-remove [n]o`; `y` removes it (uses `--force`); `n`/Esc cancels.
+- Delete modal: select a clean worktree → modal shows `[y]es [n]o`; `y` removes normally.
+- Cleanup modal: a detached-HEAD worktree does not appear in the stale list; a dirty worktree does not appear; selecting stale entries and pressing Enter removes them and refreshes; if one removal fails, the rest still run and the list view shows the accumulated error.
 
 ## Out of scope
 
