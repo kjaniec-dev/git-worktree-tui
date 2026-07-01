@@ -85,3 +85,23 @@ func TestBaseFieldSelectorOnly(t *testing.T) {
 		t.Errorf("Base accepted backspace: %q changed to %q", before, m.create.baseBranch)
 	}
 }
+
+func TestCreateEnterErrorStaysInCreate(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/nonexistent-repo-12345"))
+	m.mode = modeCreate
+	m.create.branchName = "feat-x"
+	m.create.baseBranch = "main"
+	m.create.createBranch = true
+
+	out, cmd := m.handleCreateKeyPress(tea.KeyMsg{Type: tea.KeyEnter})
+	mm := out.(Model)
+	if mm.mode != modeCreate {
+		t.Errorf("mode = %v; want modeCreate on error", mm.mode)
+	}
+	if mm.create.errMsg == "" {
+		t.Error("expected friendly error on create form, got empty errMsg")
+	}
+	if cmd != nil {
+		t.Errorf("expected no loadWorktrees cmd on error, got %v", cmd)
+	}
+}
