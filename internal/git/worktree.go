@@ -121,23 +121,37 @@ func (g *GitService) ListWorktrees() ([]model.Worktree, error) {
 	return parseWorktreeList(string(output))
 }
 
+// buildAddArgs constructs the `git worktree add` arguments for the four
+// (createBranch, branchExists) cases. Returns an error for the two invalid
+// combinations without producing args (no git invocation intended).
+func buildAddArgs(path, branch, base string, createBranch, branchExists bool) ([]string, error) {
+	switch {
+	case createBranch && branchExists:
+		return nil, fmt.Errorf("branch %q already exists; uncheck 'create new branch' to check it out", branch)
+	case !createBranch && !branchExists:
+		return nil, fmt.Errorf("branch %q does not exist; check 'create new branch' or select an existing branch", branch)
+	case createBranch && !branchExists:
+		return []string{"worktree", "add", "-b", branch, path, base}, nil
+	default: // !createBranch && branchExists
+		return []string{"worktree", "add", path, branch}, nil
+	}
+}
+
 // AddWorktree creates a new worktree
 func (g *GitService) AddWorktree(path, branch, base string, createBranch bool) error {
+	branchExists, err := g.BranchExists(branch)
+	if err != nil {
+		return fmt.Errorf("failed to check branch: %w", err)
+	}
+
+	args, err := buildAddArgs(path, branch, base, createBranch, branchExists)
+	if err != nil {
+		return err
+	}
+
 	parentDir := filepath.Dir(path)
 	if err := os.MkdirAll(parentDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", parentDir, err)
-	}
-
-	branchExists, _ := g.BranchExists(branch)
-
-	var args []string
-	args = append(args, "worktree", "add")
-
-	if createBranch && !branchExists {
-		args = append(args, "-b", branch)
-		args = append(args, path, base)
-	} else {
-		args = append(args, path, branch)
 	}
 
 	output, err := g.runGitCommand(args...)

@@ -93,3 +93,52 @@ func TestRemoveWorktreeCommand(t *testing.T) {
 		t.Error("Expected error when worktree doesn't exist")
 	}
 }
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestBuildAddArgs(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		branch       string
+		base         string
+		createBranch bool
+		branchExists bool
+		wantErr      bool
+		wantArgs     []string
+	}{
+		{"create new + branch missing", "/p", "feat", "main", true, false, false,
+			[]string{"worktree", "add", "-b", "feat", "/p", "main"}},
+		{"checkout existing + branch exists", "/p", "feat", "main", false, true, false,
+			[]string{"worktree", "add", "/p", "feat"}},
+		{"create new + branch exists -> error", "/p", "feat", "main", true, true, true, nil},
+		{"checkout existing + branch missing -> error", "/p", "feat", "main", false, false, true, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := buildAddArgs(tt.path, tt.branch, tt.base, tt.createBranch, tt.branchExists)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if !equalSlices(args, tt.wantArgs) {
+				t.Errorf("args = %v, want %v", args, tt.wantArgs)
+			}
+		})
+	}
+}
