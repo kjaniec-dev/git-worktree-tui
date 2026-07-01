@@ -154,6 +154,10 @@ func (g *GitService) AddWorktree(path, branch, base string, createBranch bool) e
 		return fmt.Errorf("failed to create directory %s: %w", parentDir, err)
 	}
 
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("path %q already exists", path)
+	}
+
 	output, err := g.runGitCommand(args...)
 	if err != nil {
 		return fmt.Errorf("failed to add worktree: %w", err)

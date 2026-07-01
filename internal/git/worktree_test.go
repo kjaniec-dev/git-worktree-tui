@@ -1,6 +1,10 @@
 package git
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -140,5 +144,34 @@ func TestBuildAddArgs(t *testing.T) {
 				t.Errorf("args = %v, want %v", args, tt.wantArgs)
 			}
 		})
+	}
+}
+
+func TestAddWorktreePathCollision(t *testing.T) {
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "-C", repo, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "config", "user.email", "t@t").CombinedOutput(); err != nil {
+		t.Fatalf("config email: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "config", "user.name", "t").CombinedOutput(); err != nil {
+		t.Fatalf("config name: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "commit", "--allow-empty", "-m", "init").CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+
+	g := NewGitService(repo)
+	collidePath := filepath.Join(t.TempDir(), "already-here")
+	if err := os.MkdirAll(collidePath, 0755); err != nil {
+		t.Fatalf("mkdir collide: %v", err)
+	}
+	err := g.AddWorktree(collidePath, "feat-x", "main", true)
+	if err == nil {
+		t.Fatal("expected collision error, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected friendly 'already exists' message, got: %v", err)
 	}
 }
