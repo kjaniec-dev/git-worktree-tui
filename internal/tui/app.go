@@ -19,6 +19,29 @@ const (
 	modeCleanup
 )
 
+// initialBase selects the default base branch from the local branch list and
+// returns its index so the create-form Base selector and the displayed base
+// stay in sync. Prefers "main" over "master" when both exist; falls back to
+// the first branch (index 0) or the literal "main" when the list is empty.
+func initialBase(branches []string) (base string, index int) {
+	base = "main"
+	if len(branches) == 0 {
+		return
+	}
+	base = branches[0]
+	for i, b := range branches {
+		if b == "main" {
+			return b, i
+		}
+	}
+	for i, b := range branches {
+		if b == "master" {
+			return b, i
+		}
+	}
+	return branches[0], 0
+}
+
 type Model struct {
 	git       *git.GitService
 	worktrees []model.Worktree
@@ -33,16 +56,7 @@ type Model struct {
 
 func NewModel(gitService *git.GitService) Model {
 	branches, _ := gitService.ListBranches()
-	baseBranch := "main"
-	if len(branches) > 0 {
-		baseBranch = branches[0]
-		for _, b := range branches {
-			if b == "main" || b == "master" {
-				baseBranch = b
-				break
-			}
-		}
-	}
+	baseBranch, baseIndex := initialBase(branches)
 
 	return Model{
 		git:      gitService,
@@ -51,6 +65,7 @@ func NewModel(gitService *git.GitService) Model {
 		create: createModel{
 			branches:     branches,
 			baseBranch:   baseBranch,
+			baseIndex:    baseIndex,
 			createBranch: true,
 			location:     "inside",
 		},
