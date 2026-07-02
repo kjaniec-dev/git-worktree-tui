@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
+	"github.com/kjaniec-dev/git-worktree-tui/internal/model"
 )
 
 func TestNewModel(t *testing.T) {
@@ -66,5 +68,35 @@ func TestEmptyListNavigationNoOp(t *testing.T) {
 		if mm.selected != 0 {
 			t.Errorf("after %v on empty list, selected = %d, want 0", msg, mm.selected)
 		}
+	}
+}
+
+func TestStatusGlyphs(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"))
+	m.worktrees = []model.Worktree{
+		{Path: "/p/locked", Branch: "b", IsLocked: true},
+		{Path: "/p/main", Branch: "main", IsMain: true},
+		{Path: "/p/dirty", Branch: "d", Status: &model.WorktreeStatus{IsDirty: true}},
+		{Path: "/p/clean", Branch: "c", Status: &model.WorktreeStatus{IsDirty: false}},
+		{Path: "/p/unknown", Branch: "u"}, // Status == nil -> not loaded
+	}
+	m.mode = modeList
+	view := m.View()
+
+	cases := []struct{ state, glyph string }{
+		{"locked", "🔒"},
+		{"main", "★"},
+		{"dirty", "●"},
+		{"clean", "○"},
+		{"unknown", "?"},
+	}
+	for _, c := range cases {
+		if !strings.Contains(view, c.glyph) {
+			t.Errorf("expected glyph %q for %s worktree in view, got:\n%s", c.glyph, c.state, view)
+		}
+	}
+	// Sanity: dirty and clean must produce DIFFERENT view strings
+	if strings.Contains(view, "● c") || strings.Contains(view, "○ d") {
+		t.Errorf("dirty/clean glyphs collided:\n%s", view)
 	}
 }

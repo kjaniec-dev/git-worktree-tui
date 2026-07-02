@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/model"
@@ -138,24 +139,41 @@ func (m Model) View() string {
 			prefix = "→ "
 		}
 
-		status := "●"
-		if wt.IsLocked {
-			status = "🔒"
-		} else if wt.IsMain {
-			status = "★"
-		} else if wt.Status != nil && wt.Status.IsDirty {
-			status = "●"
+		var glyph string
+		var glyphStyle lipgloss.Style
+		switch {
+		case wt.IsLocked:
+			glyph = "🔒"
+			glyphStyle = lockedStyle
+		case wt.IsMain:
+			glyph = "★"
+			glyphStyle = mainStyle
+		case wt.Status != nil && wt.Status.IsDirty:
+			glyph = "●"
+			glyphStyle = dirtyStyle
+		case wt.Status != nil && !wt.Status.IsDirty:
+			glyph = "○"
+			glyphStyle = cleanStyle
+		default:
+			glyph = "?"
+			glyphStyle = mutedStyle
 		}
 
-		line := fmt.Sprintf("%s%s %s", prefix, status, wt.Branch)
+		branchPart := wt.Branch
 		if wt.Detached {
-			line = fmt.Sprintf("%s%s (detached)", prefix, status)
+			branchPart = "(detached)"
 		}
 
+		var hereMarker string
+
+		renderedGlyph := glyphStyle.Render(glyph)
+		line := fmt.Sprintf("%s%s %s", prefix, renderedGlyph, branchPart)
+		if hereMarker != "" {
+			line += hereMarker
+		}
 		if i == m.selected {
 			line = selectedStyle.Render(line)
 		}
-
 		b.WriteString(line)
 		b.WriteString("\n")
 
