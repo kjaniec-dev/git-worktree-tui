@@ -60,6 +60,8 @@ type Model struct {
 	height    int
 	create    createModel
 	cleanup   cleanupModel
+	filterMode bool
+	filterText string
 }
 
 func NewModel(gitService *git.GitService, cwd string) Model {
@@ -113,6 +115,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.selected < 0 {
 			m.selected = 0
 		}
+		if m.filterText != "" && m.selected < len(m.worktrees) {
+			needle := strings.ToLower(m.filterText)
+			if !strings.Contains(strings.ToLower(m.worktrees[m.selected].Branch), needle) {
+				m.selected = advanceSelected(m.selected, +1, m.worktrees, m.filterText)
+			}
+		}
 		// Recompute stale count for the footer hint + immediate-remove fast path.
 		if branches, err := m.git.ListBranches(); err == nil {
 			branchSet := make(map[string]bool)
@@ -160,6 +168,12 @@ func (m Model) View() string {
 
 	// Worktree list
 	for i, wt := range m.worktrees {
+		if m.filterText != "" {
+			needle := strings.ToLower(m.filterText)
+			if !strings.Contains(strings.ToLower(wt.Branch), needle) {
+				continue
+			}
+		}
 		prefix := "  "
 		if i == m.selected {
 			prefix = "→ "
@@ -225,7 +239,7 @@ func (m Model) View() string {
 	}
 
 	// Help
-	helpText := "[a]dd [d]elete [c]leanup [r]efresh [q]uit"
+	helpText := "[a]dd [d]elete [c]leanup [r]efresh [o]pen (cd) [/]filter [q]uit"
 	if m.staleCount > 0 {
 		helpText = staleHintText(m.staleCount) + helpText
 	}
@@ -240,6 +254,11 @@ func (m Model) View() string {
 	if m.errMsg != "" {
 		b.WriteString("\n\n")
 		b.WriteString(errorStyle.Render(m.errMsg))
+	}
+
+	if m.filterMode {
+		b.WriteString("\n")
+		b.WriteString(mutedStyle.Render("/" + m.filterText + "▏"))
 	}
 
 	return b.String()
@@ -334,7 +353,63 @@ func staleHintText(count int) string {
 	}
 }
 
+// visibleWorktrees returns the subset of worktrees whose Branch contains filter
+// (case-insensitive substring). Empty filter returns all.
+func visibleWorktrees(wts []model.Worktree, filter string) []model.Worktree {
+	if filter == "" {
+		return wts
+	}
+	needle := strings.ToLower(filter)
+	var out []model.Worktree
+	for _, wt := range wts {
+		if strings.Contains(strings.ToLower(wt.Branch), needle) {
+			out = append(out, wt)
+		}
+	}
+	return out
+}
+
+// advanceSelected returns the next visible index starting from `sel` moving by
+// `dir` (+1 forward, -1 back), skipping worktrees filtered out by filterText.
+// Returns `sel` unchanged if no visible match exists in the requested direction.
+func advanceSelected(sel, dir int, wts []model.Worktree, filterText string) int {
+	if len(wts) == 0 {
+		return 0
+	}
+	needle := strings.ToLower(filterText)
+	match := func(i int) bool {
+		return filterText == "" || strings.Contains(strings.ToLower(wts[i].Branch), needle)
+	}
+	for step := 1; ; step++ {
+		next := sel + dir*step
+		if next < 0 || next >= len(wts) {
+			return sel
+		}
+		if match(next) {
+			return next
+		}
+	}
+}
+
 func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.filterMode {
+		switch msg.Type {
+		case tea.KeyRunes:
+			m.filterText += string(msg.Runes)
+		case tea.KeyBackspace:
+			if len(m.filterText) > 0 {
+				m.filterText = m.filterText[:len(m.filterText)-1]
+			}
+		case tea.KeyEscape:
+			m.filterMode = false
+			m.filterText = ""
+			m.selected = 0
+		case tea.KeyEnter:
+			m.filterMode = false
+		}
+		return m, nil
+	}
+
 	m.infoMsg = ""
 	switch msg.Type {
 	case tea.KeyRunes:
@@ -345,16 +420,27 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.worktrees) == 0 {
 				return m, nil
 			}
-			if m.selected < len(m.worktrees)-1 {
-				m.selected++
-			}
+			m.selected = advanceSelected(m.selected, +1, m.worktrees, m.filterText)
 			return m, nil
 		case "k":
 			if len(m.worktrees) == 0 {
 				return m, nil
 			}
-			if m.selected > 0 {
-				m.selected--
+			m.selected = advanceSelected(m.selected, -1, m.worktrees, m.filterText)
+			return m, nil
+		case "/":
+			m.filterMode = true
+			m.filterText = ""
+			return m, nil
+		case "o":
+			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
+				path := m.worktrees[m.selected].Path
+				if tryCopyClipboard("cd " + path) {
+					m.infoMsg = fmt.Sprintf("Copied: cd %s", path)
+				} else {
+					m.infoMsg = fmt.Sprintf("cd %s", path)
+				}
+				m.errMsg = ""
 			}
 			return m, nil
 		case "r":
@@ -392,16 +478,18 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.worktrees) == 0 {
 			return m, nil
 		}
-		if m.selected < len(m.worktrees)-1 {
-			m.selected++
-		}
+		m.selected = advanceSelected(m.selected, +1, m.worktrees, m.filterText)
 		return m, nil
 	case tea.KeyUp:
 		if len(m.worktrees) == 0 {
 			return m, nil
 		}
-		if m.selected > 0 {
-			m.selected--
+		m.selected = advanceSelected(m.selected, -1, m.worktrees, m.filterText)
+		return m, nil
+	case tea.KeyEscape:
+		if m.filterText != "" {
+			m.filterText = ""
+			m.selected = 0
 		}
 		return m, nil
 	case tea.KeyEnter:
