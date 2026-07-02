@@ -481,17 +481,18 @@ Add the helper function (above `handleKeyPress`):
 ```go
 // tryCopyClipboard writes path to the system clipboard via OSC 52 escape sequences.
 // Returns false if the write fails (e.g. output is piped, terminal doesn't support OSC 52).
+// The go-osc52/v2 API: osc52.New(path) returns a Sequence that implements fmt.Stringer;
+// we emit it by writing to stderr (the package's documented channel — avoids interfering
+// with bubbletea's stdout rendering in alt-screen mode).
 func tryCopyClipboard(path string) bool {
-	// OSC 52 writes to the terminal's clipboard. We write to stdout directly;
-	// bubbletea manages stdout in alt-screen mode but a direct write still
-	// reaches the terminal for most programs. If this fails, callers fall
-	// back to displaying the path text only.
-	w := osc52.NewWriter(os.Stdout)
-	return w.Copy(path) == nil
+	if _, err := fmt.Fprint(os.Stderr, osc52.New(path)); err != nil {
+		return false
+	}
+	return true
 }
 ```
 
-(Check the go-osc52/v2 API: `osc52.NewWriter(w io.Writer)` returns a `*osc52.Writer`; `Copy(s string) error` writes the OSC 52 sequence. If the API differs, the implementer should adjust to the actual exported names — verify by running `go doc github.com/aymanbagabas/go-osc52/v2` if needed.)
+Verified via `go doc github.com/aymanbagabas/go-osc52/v2`: `func New(strs ...string) Sequence`. The package's documented usage example is `fmt.Fprint(os.Stderr, osc52.New("hello world"))`. Writing to stderr keeps OSC 52 separate from bubbletea's stdout-rendered TUI frames.
 
 Add `"os"` import to `app.go` if not already present (it isn't — app.go only imports `fmt`, `"strings"`, `"time"`, `tea`, the git and model packages, and the new `"path/filepath"` and lipgloss from Tasks 1-2).
 
