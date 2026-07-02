@@ -46,8 +46,14 @@ func run(cmd *cobra.Command, args []string) error {
 			version.Major, version.Minor, version.Patch)
 	}
 
+	// Detect current working directory before launching the TUI
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
 	// Create and run TUI
-	model := tui.NewModel(gitService)
+	model := tui.NewModel(gitService, cwd)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("error running program: %w", err)

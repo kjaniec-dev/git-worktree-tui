@@ -22,7 +22,7 @@ func teaKeyBackspace() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyBackspace} }
 
 func TestCreateModal(t *testing.T) {
 	gitService := git.NewGitService("/tmp/test")
-	m := NewModel(gitService)
+	m := NewModel(gitService, "/tmp/test")
 	m.mode = modeCreate
 
 	view := m.View()
@@ -56,7 +56,7 @@ func TestPathAutoGeneration(t *testing.T) {
 }
 
 func TestBaseFieldSelectorOnly(t *testing.T) {
-	m := NewModel(git.NewGitService("/tmp/test"))
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
 	m.mode = modeCreate
 	m.create.branches = []string{"develop", "main", "feat"}
 	m.create.baseBranch = "main"
@@ -87,7 +87,7 @@ func TestBaseFieldSelectorOnly(t *testing.T) {
 }
 
 func TestCreateEnterErrorStaysInCreate(t *testing.T) {
-	m := NewModel(git.NewGitService("/tmp/nonexistent-repo-12345"))
+	m := NewModel(git.NewGitService("/tmp/nonexistent-repo-12345"), "/tmp/test")
 	m.mode = modeCreate
 	m.create.branchName = "feat-x"
 	m.create.baseBranch = "main"

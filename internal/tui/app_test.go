@@ -11,7 +11,7 @@ import (
 
 func TestNewModel(t *testing.T) {
 	gitService := git.NewGitService("/tmp/test")
-	m := NewModel(gitService)
+	m := NewModel(gitService, "/tmp/test")
 
 	if m.git == nil {
 		t.Error("Expected git service to be set")
@@ -21,6 +21,48 @@ func TestNewModel(t *testing.T) {
 	}
 	if m.mode != modeList {
 		t.Errorf("Expected mode to be modeList, got %v", m.mode)
+	}
+}
+
+func TestNewModelWithCWD(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/custom/cwd")
+	if m.cwd != "/custom/cwd" {
+		t.Errorf("m.cwd = %q, want /custom/cwd", m.cwd)
+	}
+}
+
+func TestHereMarkerOnWorktreeRoot(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/wt/feat")
+	m.worktrees = []model.Worktree{
+		{Path: "/wt/main", Branch: "main"},
+		{Path: "/wt/feat", Branch: "feat"},
+	}
+	m.mode = modeList
+	view := m.View()
+	if !strings.Contains(view, "feat (here)") {
+		t.Errorf("expected 'feat (here)' in view, got:\n%s", view)
+	}
+	if strings.Contains(view, "main (here)") {
+		t.Errorf("did not expect (here) on 'main' row, got:\n%s", view)
+	}
+	if c := strings.Count(view, "(here)"); c != 1 {
+		t.Errorf("expected exactly 1 (here) marker, got %d:\n%s", c, view)
+	}
+}
+
+func TestHereMarkerInSubdirectory(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/wt/feat/subdir")
+	m.worktrees = []model.Worktree{
+		{Path: "/wt/main", Branch: "main"},
+		{Path: "/wt/feat", Branch: "feat"},
+	}
+	m.mode = modeList
+	view := m.View()
+	if !strings.Contains(view, "feat (here)") {
+		t.Errorf("expected (here) on feat even when CWD is a subdirectory of /wt/feat:\n%s", view)
+	}
+	if c := strings.Count(view, "(here)"); c != 1 {
+		t.Errorf("expected exactly 1 (here) marker, got %d:\n%s", c, view)
 	}
 }
 
@@ -52,7 +94,7 @@ func TestInitialBase(t *testing.T) {
 }
 
 func TestEmptyListNavigationNoOp(t *testing.T) {
-	m := NewModel(git.NewGitService("/tmp/test"))
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
 	m.worktrees = nil
 	m.selected = 0
 	m.mode = modeList
@@ -72,7 +114,7 @@ func TestEmptyListNavigationNoOp(t *testing.T) {
 }
 
 func TestStatusGlyphs(t *testing.T) {
-	m := NewModel(git.NewGitService("/tmp/test"))
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
 	m.worktrees = []model.Worktree{
 		{Path: "/p/locked", Branch: "b", IsLocked: true},
 		{Path: "/p/main", Branch: "main", IsMain: true},

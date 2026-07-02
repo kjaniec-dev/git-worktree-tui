@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,13 +50,15 @@ type Model struct {
 	selected  int
 	mode      appMode
 	errMsg    string
+	infoMsg   string // populated by Enter (Task 3); rendered with infoStyle
+	cwd       string  // captured at startup; drives the (here) marker
 	width     int
 	height    int
 	create    createModel
 	cleanup   cleanupModel
 }
 
-func NewModel(gitService *git.GitService) Model {
+func NewModel(gitService *git.GitService, cwd string) Model {
 	branches, _ := gitService.ListBranches()
 	baseBranch, baseIndex := initialBase(branches)
 
@@ -63,6 +66,7 @@ func NewModel(gitService *git.GitService) Model {
 		git:      gitService,
 		selected: 0,
 		mode:     modeList,
+		cwd:      cwd,
 		create: createModel{
 			branches:     branches,
 			baseBranch:   baseBranch,
@@ -165,6 +169,9 @@ func (m Model) View() string {
 		}
 
 		var hereMarker string
+		if rel, err := filepath.Rel(wt.Path, m.cwd); err == nil && !strings.HasPrefix(rel, "..") {
+			hereMarker = mutedStyle.Render(" (here)")
+		}
 
 		renderedGlyph := glyphStyle.Render(glyph)
 		line := fmt.Sprintf("%s%s %s", prefix, renderedGlyph, branchPart)
