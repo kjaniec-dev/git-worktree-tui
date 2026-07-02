@@ -19,6 +19,29 @@ const (
 	modeCleanup
 )
 
+// initialBase selects the default base branch from the local branch list and
+// returns its index so the create-form Base selector and the displayed base
+// stay in sync. Prefers "main" over "master" when both exist; falls back to
+// the first branch (index 0) or the literal "main" when the list is empty.
+func initialBase(branches []string) (base string, index int) {
+	base = "main"
+	if len(branches) == 0 {
+		return
+	}
+	base = branches[0]
+	for i, b := range branches {
+		if b == "main" {
+			return b, i
+		}
+	}
+	for i, b := range branches {
+		if b == "master" {
+			return b, i
+		}
+	}
+	return branches[0], 0
+}
+
 type Model struct {
 	git       *git.GitService
 	worktrees []model.Worktree
@@ -33,16 +56,7 @@ type Model struct {
 
 func NewModel(gitService *git.GitService) Model {
 	branches, _ := gitService.ListBranches()
-	baseBranch := "main"
-	if len(branches) > 0 {
-		baseBranch = branches[0]
-		for _, b := range branches {
-			if b == "main" || b == "master" {
-				baseBranch = b
-				break
-			}
-		}
-	}
+	baseBranch, baseIndex := initialBase(branches)
 
 	return Model{
 		git:      gitService,
@@ -51,6 +65,7 @@ func NewModel(gitService *git.GitService) Model {
 		create: createModel{
 			branches:     branches,
 			baseBranch:   baseBranch,
+			baseIndex:    baseIndex,
 			createBranch: true,
 			location:     "inside",
 		},
@@ -111,7 +126,7 @@ func (m Model) View() string {
 	}
 
 	var b strings.Builder
-	
+
 	// Title
 	b.WriteString(titleStyle.Render("git-worktree-tui"))
 	b.WriteString("\n\n")
@@ -143,7 +158,7 @@ func (m Model) View() string {
 
 		b.WriteString(line)
 		b.WriteString("\n")
-		
+
 		commitDisplay := wt.Commit
 		if len(commitDisplay) > 7 {
 			commitDisplay = commitDisplay[:7]
@@ -218,11 +233,17 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "q":
 			return m, tea.Quit
 		case "j":
+			if len(m.worktrees) == 0 {
+				return m, nil
+			}
 			if m.selected < len(m.worktrees)-1 {
 				m.selected++
 			}
 			return m, nil
 		case "k":
+			if len(m.worktrees) == 0 {
+				return m, nil
+			}
 			if m.selected > 0 {
 				m.selected--
 			}
@@ -236,6 +257,7 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.errMsg = "Cannot delete main worktree"
 					return m, nil
 				}
+				m.errMsg = ""
 				m.mode = modeDelete
 			}
 			return m, nil
@@ -249,11 +271,17 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case tea.KeyDown:
+		if len(m.worktrees) == 0 {
+			return m, nil
+		}
 		if m.selected < len(m.worktrees)-1 {
 			m.selected++
 		}
 		return m, nil
 	case tea.KeyUp:
+		if len(m.worktrees) == 0 {
+			return m, nil
+		}
 		if m.selected > 0 {
 			m.selected--
 		}

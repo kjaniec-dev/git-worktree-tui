@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/kjaniec-dev/git-worktree-tui/internal/model"
 )
 
 type cleanupModel struct {
@@ -32,12 +34,12 @@ func (m Model) viewCleanupModal() string {
 		if m.cleanup.selected[i] {
 			prefix = "[x]"
 		}
-		
+
 		line := fmt.Sprintf("%s %s (%s)", prefix, wt.Branch, wt.Path)
 		if i == m.cleanup.currentIndex {
 			line = selectedStyle.Render(line)
 		}
-		
+
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
@@ -54,33 +56,32 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		return m, nil
 	case tea.KeyEnter:
+		if len(m.cleanup.staleWorktrees) == 0 {
+			m.mode = modeList
+			return m, m.loadWorktrees
+		}
+		var errs []string
 		for i, idx := range m.cleanup.staleWorktrees {
 			if !m.cleanup.selected[i] {
 				continue
 			}
-
 			wt := m.worktrees[idx]
-
-			if wt.IsMain {
+			if wt.IsMain || wt.IsLocked {
 				continue
 			}
-
-			if wt.IsLocked {
-				continue
-			}
-
 			if wt.Status != nil && wt.Status.IsDirty {
 				continue
 			}
-
-			err := m.git.RemoveWorktree(wt.Path)
-			if err != nil {
-				m.errMsg = fmt.Sprintf("Failed to remove %s: %v", wt.Path, err)
-				return m, nil
+			if err := m.git.RemoveWorktree(wt.Path, false); err != nil {
+				errs = append(errs, fmt.Sprintf("failed to remove %s: %v", wt.Path, err))
 			}
 		}
-
 		m.mode = modeList
+		if len(errs) > 0 {
+			m.errMsg = strings.Join(errs, "; ")
+		} else {
+			m.errMsg = ""
+		}
 		return m, m.loadWorktrees
 	case tea.KeySpace:
 		if len(m.cleanup.selected) > 0 {
@@ -126,6 +127,25 @@ func (m Model) handleCleanupKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// classifyStale returns the indices of worktrees that are stale: non-main,
+// non-locked, non-detached, non-dirty, and whose branch is not a local
+// branch in branchSet.
+func classifyStale(wts []model.Worktree, branchSet map[string]bool) []int {
+	var stale []int
+	for i, wt := range wts {
+		if wt.IsMain || wt.IsLocked || wt.Detached {
+			continue
+		}
+		if wt.Status != nil && wt.Status.IsDirty {
+			continue
+		}
+		if !branchSet[wt.Branch] {
+			stale = append(stale, i)
+		}
+	}
+	return stale
+}
+
 func (m *Model) findStaleWorktrees() {
 	branches, err := m.git.ListBranches()
 	if err != nil {
@@ -137,16 +157,6 @@ func (m *Model) findStaleWorktrees() {
 		branchSet[b] = true
 	}
 
-	m.cleanup.staleWorktrees = nil
-	m.cleanup.selected = nil
-
-	for i, wt := range m.worktrees {
-		if wt.IsMain {
-			continue
-		}
-		if !branchSet[wt.Branch] {
-			m.cleanup.staleWorktrees = append(m.cleanup.staleWorktrees, i)
-			m.cleanup.selected = append(m.cleanup.selected, false)
-		}
-	}
+	m.cleanup.staleWorktrees = classifyStale(m.worktrees, branchSet)
+	m.cleanup.selected = make([]bool, len(m.cleanup.staleWorktrees))
 }

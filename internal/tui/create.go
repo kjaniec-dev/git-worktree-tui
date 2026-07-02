@@ -132,8 +132,6 @@ func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyBackspace:
 		if m.create.currentField == fieldBranch && len(m.create.branchName) > 0 {
 			m.create.branchName = m.create.branchName[:len(m.create.branchName)-1]
-		} else if m.create.currentField == fieldBase && len(m.create.baseBranch) > 0 {
-			m.create.baseBranch = m.create.baseBranch[:len(m.create.baseBranch)-1]
 		}
 		return m, nil
 	case tea.KeySpace:
@@ -144,8 +142,6 @@ func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyRunes:
 		if m.create.currentField == fieldBranch {
 			m.create.branchName += string(msg.Runes)
-		} else if m.create.currentField == fieldBase {
-			m.create.baseBranch += string(msg.Runes)
 		} else if m.create.currentField == fieldLocation {
 			if msg.String() == "l" {
 				if m.create.location == "inside" {

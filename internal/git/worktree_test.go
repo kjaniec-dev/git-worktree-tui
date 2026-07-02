@@ -1,6 +1,10 @@
 package git
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -88,8 +92,97 @@ func TestAddWorktreeCommand(t *testing.T) {
 
 func TestRemoveWorktreeCommand(t *testing.T) {
 	g := NewGitService("/tmp/nonexistent-repo-12345")
-	err := g.RemoveWorktree("/tmp/nonexistent-worktree")
+	if err := g.RemoveWorktree("/tmp/nonexistent-worktree", false); err == nil {
+		t.Error("Expected error when worktree doesn't exist (force=false)")
+	}
+	if err := g.RemoveWorktree("/tmp/nonexistent-worktree", true); err == nil {
+		t.Error("Expected error when worktree doesn't exist (force=true)")
+	}
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestBuildRemoveArgs(t *testing.T) {
+	if got := buildRemoveArgs("/p", false); !equalSlices(got, []string{"worktree", "remove", "/p"}) {
+		t.Errorf("no-force = %v", got)
+	}
+	if got := buildRemoveArgs("/p", true); !equalSlices(got, []string{"worktree", "remove", "--force", "/p"}) {
+		t.Errorf("force = %v", got)
+	}
+}
+
+func TestBuildAddArgs(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		branch       string
+		base         string
+		createBranch bool
+		branchExists bool
+		wantErr      bool
+		wantArgs     []string
+	}{
+		{"create new + branch missing", "/p", "feat", "main", true, false, false,
+			[]string{"worktree", "add", "-b", "feat", "/p", "main"}},
+		{"checkout existing + branch exists", "/p", "feat", "main", false, true, false,
+			[]string{"worktree", "add", "/p", "feat"}},
+		{"create new + branch exists -> error", "/p", "feat", "main", true, true, true, nil},
+		{"checkout existing + branch missing -> error", "/p", "feat", "main", false, false, true, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := buildAddArgs(tt.path, tt.branch, tt.base, tt.createBranch, tt.branchExists)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if !equalSlices(args, tt.wantArgs) {
+				t.Errorf("args = %v, want %v", args, tt.wantArgs)
+			}
+		})
+	}
+}
+
+func TestAddWorktreePathCollision(t *testing.T) {
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "-C", repo, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "config", "user.email", "t@t").CombinedOutput(); err != nil {
+		t.Fatalf("config email: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "config", "user.name", "t").CombinedOutput(); err != nil {
+		t.Fatalf("config name: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "commit", "--allow-empty", "-m", "init").CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+
+	g := NewGitService(repo)
+	collidePath := filepath.Join(t.TempDir(), "already-here")
+	if err := os.MkdirAll(collidePath, 0755); err != nil {
+		t.Fatalf("mkdir collide: %v", err)
+	}
+	err := g.AddWorktree(collidePath, "feat-x", "main", true)
 	if err == nil {
-		t.Error("Expected error when worktree doesn't exist")
+		t.Fatal("expected collision error, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected friendly 'already exists' message, got: %v", err)
 	}
 }
