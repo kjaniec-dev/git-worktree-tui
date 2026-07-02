@@ -10,7 +10,7 @@ import (
 
 func TestDeleteModal(t *testing.T) {
 	gitService := git.NewGitService("/tmp/test")
-	m := NewModel(gitService)
+	m := NewModel(gitService, "/tmp/test")
 	m.worktrees = []model.Worktree{
 		{Path: "/path/to/feature", Branch: "feature/auth", IsMain: false},
 	}
@@ -25,7 +25,7 @@ func TestDeleteModal(t *testing.T) {
 }
 
 func TestDeleteModalForceConfirm(t *testing.T) {
-	m := NewModel(git.NewGitService("/tmp/test"))
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
 	m.worktrees = []model.Worktree{
 		{Path: "/p/clean", Branch: "clean", IsMain: false, Status: &model.WorktreeStatus{IsDirty: false}},
 		{Path: "/p/dirty", Branch: "dirty", IsMain: false, Status: &model.WorktreeStatus{IsDirty: true}},
@@ -46,7 +46,7 @@ func TestDeleteModalForceConfirm(t *testing.T) {
 }
 
 func TestDeleteClearsErrMsgOnEntry(t *testing.T) {
-	m := NewModel(git.NewGitService("/tmp/test"))
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
 	m.worktrees = []model.Worktree{{Path: "/p", Branch: "b", IsMain: false}}
 	m.selected = 0
 	m.errMsg = "stale from before"

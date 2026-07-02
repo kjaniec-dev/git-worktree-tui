@@ -41,7 +41,7 @@ func equalInts(a, b []int) bool {
 
 func TestCleanupModal(t *testing.T) {
 	gitService := git.NewGitService("/tmp/test")
-	m := NewModel(gitService)
+	m := NewModel(gitService, "/tmp/test")
 	m.worktrees = []model.Worktree{
 		{Path: "/path/to/stale", Branch: "stale-branch", IsMain: false},
 	}
@@ -55,7 +55,7 @@ func TestCleanupModal(t *testing.T) {
 }
 
 func TestCleanupEnterAccumulatesErrors(t *testing.T) {
-	m := NewModel(git.NewGitService("/tmp/nonexistent-repo-12345"))
+	m := NewModel(git.NewGitService("/tmp/nonexistent-repo-12345"), "/tmp/test")
 	// Two stale worktrees pointing at nonexistent paths -> both RemoveWorktree calls error.
 	m.worktrees = []model.Worktree{
 		{Path: "/tmp/no-such-1", Branch: "gone1"},

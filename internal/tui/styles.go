@@ -18,4 +18,7 @@ var (
 	mutedStyle = lipgloss.NewStyle().Foreground(mutedColor)
 	errorStyle = lipgloss.NewStyle().Foreground(errorColor).Bold(true)
 	helpStyle = lipgloss.NewStyle().Foreground(mutedColor).MarginTop(1)
+
+	infoStyle = lipgloss.NewStyle().Foreground(successColor)
+	mainStyle = lipgloss.NewStyle().Foreground(primaryColor)
 )
