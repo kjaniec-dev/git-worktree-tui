@@ -180,6 +180,16 @@ func (m Model) View() string {
 		if hereMarker != "" {
 			line += hereMarker
 		}
+		if wt.Status != nil && (wt.Status.Ahead > 0 || wt.Status.Behind > 0) {
+			var ab strings.Builder
+			if wt.Status.Ahead > 0 {
+				ab.WriteString(fmt.Sprintf(" ↑%d", wt.Status.Ahead))
+			}
+			if wt.Status.Behind > 0 {
+				ab.WriteString(fmt.Sprintf(" ↓%d", wt.Status.Behind))
+			}
+			line += mutedStyle.Render(ab.String())
+		}
 		if i == m.selected {
 			line = selectedStyle.Render(line)
 		}
@@ -190,7 +200,7 @@ func (m Model) View() string {
 		if len(commitDisplay) > 7 {
 			commitDisplay = commitDisplay[:7]
 		}
-		b.WriteString(fmt.Sprintf("    %s • %s", commitDisplay, wt.Path))
+		b.WriteString(fmt.Sprintf("    %s • %s", commitDisplay, truncatePath(wt.Path)))
 		b.WriteString("\n\n")
 	}
 
@@ -263,6 +273,20 @@ func tryCopyClipboard(path string) bool {
 		return false
 	}
 	return true
+}
+
+// truncatePath shortens paths longer than 40 chars to "..." + last two path segments.
+// Paths ≤ 40 chars or paths with fewer than 3 segments are returned as-is.
+func truncatePath(path string) string {
+	if len(path) <= 40 || path == "" {
+		return path
+	}
+	sep := string(filepath.Separator)
+	parts := strings.Split(path, sep)
+	if len(parts) < 3 {
+		return path
+	}
+	return "..." + sep + parts[len(parts)-2] + sep + parts[len(parts)-1]
 }
 
 func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

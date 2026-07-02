@@ -185,3 +185,34 @@ func TestInfoMsgClearedOnNextKeypress(t *testing.T) {
 		t.Errorf("infoMsg should be cleared on next keypress, got %q", mm.infoMsg)
 	}
 }
+
+func TestTruncatePath(t *testing.T) {
+	tests := []struct{ in, want string}{
+		{"/short", "/short"},
+		{"", ""},
+		{"/Users/kjaniec-dev/dev/projects/git-worktree-tui", ".../projects/git-worktree-tui"},
+	}
+	for _, tt := range tests {
+		got := truncatePath(tt.in)
+		if got != tt.want {
+			t.Errorf("truncatePath(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestAheadBehindAnnotation(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{
+		{Path: "/p", Branch: "feat", Status: &model.WorktreeStatus{Ahead: 3, Behind: 0}},
+		{Path: "/p2", Branch: "main", Status: &model.WorktreeStatus{Ahead: 0, Behind: 1}},
+		{Path: "/p3", Branch: "clean", Status: &model.WorktreeStatus{Ahead: 0, Behind: 0}},
+	}
+	m.mode = modeList
+	view := m.View()
+	if !strings.Contains(view, "↑3") {
+		t.Errorf("expected ↑3 annotation:\n%s", view)
+	}
+	if !strings.Contains(view, "↓1") {
+		t.Errorf("expected ↓1 annotation:\n%s", view)
+	}
+}

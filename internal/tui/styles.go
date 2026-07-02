@@ -21,4 +21,6 @@ var (
 
 	infoStyle = lipgloss.NewStyle().Foreground(successColor)
 	mainStyle = lipgloss.NewStyle().Foreground(primaryColor)
+
+	activeFieldStyle = lipgloss.NewStyle().Foreground(primaryColor).Bold(true)
 )
