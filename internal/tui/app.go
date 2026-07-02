@@ -53,6 +53,8 @@ type Model struct {
 	mode      appMode
 	errMsg    string
 	infoMsg   string // populated by Enter (Task 3); rendered with infoStyle
+	staleCount int
+	stalePaths []string
 	cwd       string  // captured at startup; drives the (here) marker
 	width     int
 	height    int
@@ -80,7 +82,7 @@ func NewModel(gitService *git.GitService, cwd string) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.loadWorktrees
+	return tea.Batch(m.loadWorktrees, autoRefresh())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -100,6 +102,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+	case tickMsg:
+		return m, tea.Batch(m.loadWorktrees, autoRefresh())
 	case worktreesLoadedMsg:
 		m.worktrees = msg.worktrees
 		m.errMsg = ""
@@ -108,6 +112,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.selected < 0 {
 			m.selected = 0
+		}
+		// Recompute stale count for the footer hint + immediate-remove fast path.
+		if branches, err := m.git.ListBranches(); err == nil {
+			branchSet := make(map[string]bool)
+			for _, b := range branches {
+				branchSet[b] = true
+			}
+			staleIdxs := classifyStale(m.worktrees, branchSet)
+			m.staleCount = len(staleIdxs)
+			m.stalePaths = make([]string, 0, len(staleIdxs))
+			for _, idx := range staleIdxs {
+				m.stalePaths = append(m.stalePaths, m.worktrees[idx].Path)
+			}
+		} else {
+			m.staleCount = 0
+			m.stalePaths = nil
 		}
 		return m, nil
 	case errMsg:
@@ -205,7 +225,11 @@ func (m Model) View() string {
 	}
 
 	// Help
-	b.WriteString(helpStyle.Render("[a]dd [d]elete [c]leanup [r]efresh [q]uit"))
+	helpText := "[a]dd [d]elete [c]leanup [r]efresh [q]uit"
+	if m.staleCount > 0 {
+		helpText = staleHintText(m.staleCount) + helpText
+	}
+	b.WriteString(helpStyle.Render(helpText))
 
 	if m.infoMsg != "" {
 		b.WriteString("\n")
@@ -226,7 +250,17 @@ type worktreesLoadedMsg struct {
 	worktrees []model.Worktree
 }
 
+type tickMsg time.Time
+
 type errMsg string
+
+// autoRefresh schedules a loadWorktrees refresh via tea.Tick every 10 seconds.
+// The cycle continues: each tick fires a tickMsg, which schedules the next refresh+tick.
+func autoRefresh() tea.Cmd {
+	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
 
 // Commands
 func (m Model) loadWorktrees() tea.Msg {
@@ -289,6 +323,17 @@ func truncatePath(path string) string {
 	return "..." + sep + parts[len(parts)-2] + sep + parts[len(parts)-1]
 }
 
+func staleHintText(count int) string {
+	switch {
+	case count <= 0:
+		return "  "
+	case count == 1:
+		return "  [c]leanup 1 stale (Enter to remove)  "
+	default:
+		return fmt.Sprintf("  [c]leanup %d stale  ", count)
+	}
+}
+
 func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.infoMsg = ""
 	switch msg.Type {
@@ -329,6 +374,15 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeCreate
 			return m, nil
 		case "c":
+			if m.staleCount == 1 && len(m.stalePaths) == 1 {
+				path := m.stalePaths[0]
+				if err := m.git.RemoveWorktree(path, false); err != nil {
+					m.errMsg = fmt.Sprintf("Failed to remove %s: %v", path, err)
+				} else {
+					m.infoMsg = fmt.Sprintf("Removed: %s", path)
+				}
+				return m, m.loadWorktrees
+			}
 			m.findStaleWorktrees()
 			m.cleanup.currentIndex = 0
 			m.mode = modeCleanup

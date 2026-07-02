@@ -216,3 +216,36 @@ func TestAheadBehindAnnotation(t *testing.T) {
 		t.Errorf("expected ↓1 annotation:\n%s", view)
 	}
 }
+
+func TestStaleHintText(t *testing.T) {
+	tests := []struct {
+		count int
+		want  string
+	}{
+		{0, "  "},
+		{1, "  [c]leanup 1 stale (Enter to remove)  "},
+		{3, "  [c]leanup 3 stale  "},
+		{7, "  [c]leanup 7 stale  "},
+	}
+	for _, tt := range tests {
+		got := staleHintText(tt.count)
+		if got != tt.want {
+			t.Errorf("staleHintText(%d) = %q, want %q", tt.count, got, tt.want)
+		}
+	}
+}
+
+func TestAutoRefreshTick(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	// Init should return a Batch (loadWorktrees + autoRefresh)
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("Init returned nil cmd")
+	}
+	// On tickMsg, Update must return a non-nil refresh cmd
+	updated, cmd := m.Update(tickMsg{})
+	if cmd == nil {
+		t.Error("Update on tickMsg must return a refresh cmd (tea.Batch)")
+	}
+	_ = updated
+}
