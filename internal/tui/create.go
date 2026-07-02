@@ -18,14 +18,14 @@ const (
 )
 
 type createModel struct {
-	branchName    string
-	baseBranch    string
-	createBranch  bool
-	currentField  createField
-	branches      []string
-	baseIndex     int
-	errMsg        string
-	location      string // "inside" or "outside"
+	branchName   string
+	baseBranch   string
+	createBranch bool
+	currentField createField
+	branches     []string
+	baseIndex    int
+	errMsg       string
+	location     string // "inside" or "outside"
 }
 
 func generateWorktreePath(repoRoot, branch, location string) string {

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/aymanbagabas/go-osc52/v2"
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/model"
 )
@@ -47,19 +47,19 @@ func initialBase(branches []string) (base string, index int) {
 }
 
 type Model struct {
-	git       *git.GitService
-	worktrees []model.Worktree
-	selected  int
-	mode      appMode
-	errMsg    string
-	infoMsg   string // populated by Enter (Task 3); rendered with infoStyle
+	git        *git.GitService
+	worktrees  []model.Worktree
+	selected   int
+	mode       appMode
+	errMsg     string
+	infoMsg    string // populated by Enter (Task 3); rendered with infoStyle
 	staleCount int
 	stalePaths []string
-	cwd       string  // captured at startup; drives the (here) marker
-	width     int
-	height    int
-	create    createModel
-	cleanup   cleanupModel
+	cwd        string // captured at startup; drives the (here) marker
+	width      int
+	height     int
+	create     createModel
+	cleanup    cleanupModel
 	filterMode bool
 	filterText string
 }

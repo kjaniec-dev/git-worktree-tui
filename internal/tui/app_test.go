@@ -187,7 +187,7 @@ func TestInfoMsgClearedOnNextKeypress(t *testing.T) {
 }
 
 func TestTruncatePath(t *testing.T) {
-	tests := []struct{ in, want string}{
+	tests := []struct{ in, want string }{
 		{"/short", "/short"},
 		{"", ""},
 		{"/Users/kjaniec-dev/dev/projects/git-worktree-tui", ".../projects/git-worktree-tui"},
