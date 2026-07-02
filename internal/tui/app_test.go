@@ -185,3 +185,159 @@ func TestInfoMsgClearedOnNextKeypress(t *testing.T) {
 		t.Errorf("infoMsg should be cleared on next keypress, got %q", mm.infoMsg)
 	}
 }
+
+func TestTruncatePath(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"/short", "/short"},
+		{"", ""},
+		{"/Users/kjaniec-dev/dev/projects/git-worktree-tui", ".../projects/git-worktree-tui"},
+	}
+	for _, tt := range tests {
+		got := truncatePath(tt.in)
+		if got != tt.want {
+			t.Errorf("truncatePath(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestAheadBehindAnnotation(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{
+		{Path: "/p", Branch: "feat", Status: &model.WorktreeStatus{Ahead: 3, Behind: 0}},
+		{Path: "/p2", Branch: "main", Status: &model.WorktreeStatus{Ahead: 0, Behind: 1}},
+		{Path: "/p3", Branch: "clean", Status: &model.WorktreeStatus{Ahead: 0, Behind: 0}},
+	}
+	m.mode = modeList
+	view := m.View()
+	if !strings.Contains(view, "↑3") {
+		t.Errorf("expected ↑3 annotation:\n%s", view)
+	}
+	if !strings.Contains(view, "↓1") {
+		t.Errorf("expected ↓1 annotation:\n%s", view)
+	}
+}
+
+func TestStaleHintText(t *testing.T) {
+	tests := []struct {
+		count int
+		want  string
+	}{
+		{0, "  "},
+		{1, "  [c]leanup 1 stale (Enter to remove)  "},
+		{3, "  [c]leanup 3 stale  "},
+		{7, "  [c]leanup 7 stale  "},
+	}
+	for _, tt := range tests {
+		got := staleHintText(tt.count)
+		if got != tt.want {
+			t.Errorf("staleHintText(%d) = %q, want %q", tt.count, got, tt.want)
+		}
+	}
+}
+
+func TestAutoRefreshTick(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	// Init should return a Batch (loadWorktrees + autoRefresh)
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("Init returned nil cmd")
+	}
+	// On tickMsg, Update must return a non-nil refresh cmd
+	updated, cmd := m.Update(tickMsg{})
+	if cmd == nil {
+		t.Error("Update on tickMsg must return a refresh cmd (tea.Batch)")
+	}
+	_ = updated
+}
+
+func TestVisibleWorktrees(t *testing.T) {
+	wts := []model.Worktree{
+		{Branch: "main"},
+		{Branch: "feature/auth"},
+		{Branch: "dev/fix"},
+		{Branch: "(detached)"},
+	}
+	if got := visibleWorktrees(wts, ""); len(got) != 4 {
+		t.Errorf("empty filter: len %d, want 4", len(got))
+	}
+	if got := visibleWorktrees(wts, "auth"); len(got) != 1 || got[0].Branch != "feature/auth" {
+		t.Errorf("auth filter: %+v", got)
+	}
+	if got := visibleWorktrees(wts, "MAIN"); len(got) != 1 || got[0].Branch != "main" {
+		t.Errorf("case-insensitive MAIN: %+v", got)
+	}
+	if got := visibleWorktrees(wts, "zzz"); len(got) != 0 {
+		t.Errorf("non-matching filter: len %d, want 0", len(got))
+	}
+	if got := visibleWorktrees(wts, "detach"); len(got) != 1 {
+		t.Errorf("detach substring: %+v", got)
+	}
+}
+
+func TestAdvanceSelected(t *testing.T) {
+	wts := []model.Worktree{
+		{Branch: "main"}, {Branch: "feature/auth"}, {Branch: "dev/fix"},
+	}
+	if got := advanceSelected(0, +1, wts, ""); got != 1 {
+		t.Errorf("no-filter 0→1: got %d", got)
+	}
+	if got := advanceSelected(2, +1, wts, ""); got != 2 {
+		t.Errorf("no-filter clamp at 2: got %d", got)
+	}
+	// Filter "auth": only index 1 matches. From 0 (main, filtered out) advance +1 should go to 1.
+	if got := advanceSelected(0, +1, wts, "auth"); got != 1 {
+		t.Errorf("filter auth from 0 up by 1: got %d, want 1", got)
+	}
+	if got := advanceSelected(0, +1, wts, "zzz"); got != 0 {
+		t.Errorf("no visible match: got %d, want 0 (stay)", got)
+	}
+}
+
+func TestOKeybind(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{{Path: "/wt/feat", Branch: "feat"}}
+	m.selected = 0
+	m.mode = modeList
+	out, _ := m.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	mm := out.(Model)
+	if !strings.Contains(mm.infoMsg, "cd /wt/feat") {
+		t.Errorf("expected infoMsg with 'cd /wt/feat', got %q", mm.infoMsg)
+	}
+	if mm.errMsg != "" {
+		t.Errorf("errMsg should be empty on o, got %q", mm.errMsg)
+	}
+}
+
+func TestFilterModeFlow(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{
+		{Branch: "main"}, {Branch: "feature/auth"}, {Branch: "dev/fix"},
+	}
+	m.mode = modeList
+
+	// Enter filter mode
+	out, _ := m.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	mm := out.(Model)
+	if !mm.filterMode {
+		t.Error("expected filterMode after /")
+	}
+
+	// Type "auth"
+	m = mm
+	out, _ = m.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("auth")})
+	mm = out.(Model)
+	if mm.filterText != "auth" {
+		t.Errorf("filterText = %q, want 'auth'", mm.filterText)
+	}
+
+	// Esc clears filter + exits filter mode
+	m = mm
+	out, _ = m.handleKeyPress(tea.KeyMsg{Type: tea.KeyEscape})
+	mm = out.(Model)
+	if mm.filterMode {
+		t.Error("filterMode should be false after Esc")
+	}
+	if mm.filterText != "" {
+		t.Errorf("filterText should be empty after Esc, got %q", mm.filterText)
+	}
+}

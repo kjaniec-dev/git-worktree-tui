@@ -18,14 +18,14 @@ const (
 )
 
 type createModel struct {
-	branchName    string
-	baseBranch    string
-	createBranch  bool
-	currentField  createField
-	branches      []string
-	baseIndex     int
-	errMsg        string
-	location      string // "inside" or "outside"
+	branchName   string
+	baseBranch   string
+	createBranch bool
+	currentField createField
+	branches     []string
+	baseIndex    int
+	errMsg       string
+	location     string // "inside" or "outside"
 }
 
 func generateWorktreePath(repoRoot, branch, location string) string {
@@ -46,7 +46,15 @@ func (m Model) viewCreateModal() string {
 	branchLabel := fmt.Sprintf("Branch name: [%s]", m.create.branchName)
 	baseLabel := fmt.Sprintf("Base: [%s]", m.create.baseBranch)
 	checkboxLabel := fmt.Sprintf("☐ Create new branch from base: %v", m.create.createBranch)
-	locationLabel := fmt.Sprintf("Location: [%s]", m.create.location)
+	var insidePart, outsidePart string
+	if m.create.location == "inside" {
+		insidePart = activeFieldStyle.Render("inside")
+		outsidePart = mutedStyle.Render("outside")
+	} else {
+		insidePart = mutedStyle.Render("inside")
+		outsidePart = activeFieldStyle.Render("outside")
+	}
+	locationLabel := fmt.Sprintf("Location: <%s | %s>", insidePart, outsidePart)
 
 	if m.create.currentField == fieldBranch {
 		b.WriteString(selectedStyle.Render("→ " + branchLabel))

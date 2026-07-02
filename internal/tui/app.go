@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/aymanbagabas/go-osc52/v2"
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/model"
 )
@@ -47,17 +47,21 @@ func initialBase(branches []string) (base string, index int) {
 }
 
 type Model struct {
-	git       *git.GitService
-	worktrees []model.Worktree
-	selected  int
-	mode      appMode
-	errMsg    string
-	infoMsg   string // populated by Enter (Task 3); rendered with infoStyle
-	cwd       string  // captured at startup; drives the (here) marker
-	width     int
-	height    int
-	create    createModel
-	cleanup   cleanupModel
+	git        *git.GitService
+	worktrees  []model.Worktree
+	selected   int
+	mode       appMode
+	errMsg     string
+	infoMsg    string // populated by Enter (Task 3); rendered with infoStyle
+	staleCount int
+	stalePaths []string
+	cwd        string // captured at startup; drives the (here) marker
+	width      int
+	height     int
+	create     createModel
+	cleanup    cleanupModel
+	filterMode bool
+	filterText string
 }
 
 func NewModel(gitService *git.GitService, cwd string) Model {
@@ -80,7 +84,7 @@ func NewModel(gitService *git.GitService, cwd string) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.loadWorktrees
+	return tea.Batch(m.loadWorktrees, autoRefresh())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -100,6 +104,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+	case tickMsg:
+		return m, tea.Batch(m.loadWorktrees, autoRefresh())
 	case worktreesLoadedMsg:
 		m.worktrees = msg.worktrees
 		m.errMsg = ""
@@ -108,6 +114,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.selected < 0 {
 			m.selected = 0
+		}
+		if m.filterText != "" && m.selected < len(m.worktrees) {
+			needle := strings.ToLower(m.filterText)
+			if !strings.Contains(strings.ToLower(m.worktrees[m.selected].Branch), needle) {
+				m.selected = advanceSelected(m.selected, +1, m.worktrees, m.filterText)
+			}
+		}
+		// Recompute stale count for the footer hint + immediate-remove fast path.
+		if branches, err := m.git.ListBranches(); err == nil {
+			branchSet := make(map[string]bool)
+			for _, b := range branches {
+				branchSet[b] = true
+			}
+			staleIdxs := classifyStale(m.worktrees, branchSet)
+			m.staleCount = len(staleIdxs)
+			m.stalePaths = make([]string, 0, len(staleIdxs))
+			for _, idx := range staleIdxs {
+				m.stalePaths = append(m.stalePaths, m.worktrees[idx].Path)
+			}
+		} else {
+			m.staleCount = 0
+			m.stalePaths = nil
 		}
 		return m, nil
 	case errMsg:
@@ -140,6 +168,12 @@ func (m Model) View() string {
 
 	// Worktree list
 	for i, wt := range m.worktrees {
+		if m.filterText != "" {
+			needle := strings.ToLower(m.filterText)
+			if !strings.Contains(strings.ToLower(wt.Branch), needle) {
+				continue
+			}
+		}
 		prefix := "  "
 		if i == m.selected {
 			prefix = "→ "
@@ -180,6 +214,16 @@ func (m Model) View() string {
 		if hereMarker != "" {
 			line += hereMarker
 		}
+		if wt.Status != nil && (wt.Status.Ahead > 0 || wt.Status.Behind > 0) {
+			var ab strings.Builder
+			if wt.Status.Ahead > 0 {
+				ab.WriteString(fmt.Sprintf(" ↑%d", wt.Status.Ahead))
+			}
+			if wt.Status.Behind > 0 {
+				ab.WriteString(fmt.Sprintf(" ↓%d", wt.Status.Behind))
+			}
+			line += mutedStyle.Render(ab.String())
+		}
 		if i == m.selected {
 			line = selectedStyle.Render(line)
 		}
@@ -190,12 +234,16 @@ func (m Model) View() string {
 		if len(commitDisplay) > 7 {
 			commitDisplay = commitDisplay[:7]
 		}
-		b.WriteString(fmt.Sprintf("    %s • %s", commitDisplay, wt.Path))
+		b.WriteString(fmt.Sprintf("    %s • %s", commitDisplay, truncatePath(wt.Path)))
 		b.WriteString("\n\n")
 	}
 
 	// Help
-	b.WriteString(helpStyle.Render("[a]dd [d]elete [c]leanup [r]efresh [q]uit"))
+	helpText := "[a]dd [d]elete [c]leanup [r]efresh [o]pen (cd) [/]filter [q]uit"
+	if m.staleCount > 0 {
+		helpText = staleHintText(m.staleCount) + helpText
+	}
+	b.WriteString(helpStyle.Render(helpText))
 
 	if m.infoMsg != "" {
 		b.WriteString("\n")
@@ -208,6 +256,11 @@ func (m Model) View() string {
 		b.WriteString(errorStyle.Render(m.errMsg))
 	}
 
+	if m.filterMode {
+		b.WriteString("\n")
+		b.WriteString(mutedStyle.Render("/" + m.filterText + "▏"))
+	}
+
 	return b.String()
 }
 
@@ -216,7 +269,17 @@ type worktreesLoadedMsg struct {
 	worktrees []model.Worktree
 }
 
+type tickMsg time.Time
+
 type errMsg string
+
+// autoRefresh schedules a loadWorktrees refresh via tea.Tick every 10 seconds.
+// The cycle continues: each tick fires a tickMsg, which schedules the next refresh+tick.
+func autoRefresh() tea.Cmd {
+	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
 
 // Commands
 func (m Model) loadWorktrees() tea.Msg {
@@ -265,7 +328,88 @@ func tryCopyClipboard(path string) bool {
 	return true
 }
 
+// truncatePath shortens paths longer than 40 chars to "..." + last two path segments.
+// Paths ≤ 40 chars or paths with fewer than 3 segments are returned as-is.
+func truncatePath(path string) string {
+	if len(path) <= 40 || path == "" {
+		return path
+	}
+	sep := string(filepath.Separator)
+	parts := strings.Split(path, sep)
+	if len(parts) < 3 {
+		return path
+	}
+	return "..." + sep + parts[len(parts)-2] + sep + parts[len(parts)-1]
+}
+
+func staleHintText(count int) string {
+	switch {
+	case count <= 0:
+		return "  "
+	case count == 1:
+		return "  [c]leanup 1 stale (Enter to remove)  "
+	default:
+		return fmt.Sprintf("  [c]leanup %d stale  ", count)
+	}
+}
+
+// visibleWorktrees returns the subset of worktrees whose Branch contains filter
+// (case-insensitive substring). Empty filter returns all.
+func visibleWorktrees(wts []model.Worktree, filter string) []model.Worktree {
+	if filter == "" {
+		return wts
+	}
+	needle := strings.ToLower(filter)
+	var out []model.Worktree
+	for _, wt := range wts {
+		if strings.Contains(strings.ToLower(wt.Branch), needle) {
+			out = append(out, wt)
+		}
+	}
+	return out
+}
+
+// advanceSelected returns the next visible index starting from `sel` moving by
+// `dir` (+1 forward, -1 back), skipping worktrees filtered out by filterText.
+// Returns `sel` unchanged if no visible match exists in the requested direction.
+func advanceSelected(sel, dir int, wts []model.Worktree, filterText string) int {
+	if len(wts) == 0 {
+		return 0
+	}
+	needle := strings.ToLower(filterText)
+	match := func(i int) bool {
+		return filterText == "" || strings.Contains(strings.ToLower(wts[i].Branch), needle)
+	}
+	for step := 1; ; step++ {
+		next := sel + dir*step
+		if next < 0 || next >= len(wts) {
+			return sel
+		}
+		if match(next) {
+			return next
+		}
+	}
+}
+
 func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.filterMode {
+		switch msg.Type {
+		case tea.KeyRunes:
+			m.filterText += string(msg.Runes)
+		case tea.KeyBackspace:
+			if len(m.filterText) > 0 {
+				m.filterText = m.filterText[:len(m.filterText)-1]
+			}
+		case tea.KeyEscape:
+			m.filterMode = false
+			m.filterText = ""
+			m.selected = 0
+		case tea.KeyEnter:
+			m.filterMode = false
+		}
+		return m, nil
+	}
+
 	m.infoMsg = ""
 	switch msg.Type {
 	case tea.KeyRunes:
@@ -276,16 +420,27 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if len(m.worktrees) == 0 {
 				return m, nil
 			}
-			if m.selected < len(m.worktrees)-1 {
-				m.selected++
-			}
+			m.selected = advanceSelected(m.selected, +1, m.worktrees, m.filterText)
 			return m, nil
 		case "k":
 			if len(m.worktrees) == 0 {
 				return m, nil
 			}
-			if m.selected > 0 {
-				m.selected--
+			m.selected = advanceSelected(m.selected, -1, m.worktrees, m.filterText)
+			return m, nil
+		case "/":
+			m.filterMode = true
+			m.filterText = ""
+			return m, nil
+		case "o":
+			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
+				path := m.worktrees[m.selected].Path
+				if tryCopyClipboard("cd " + path) {
+					m.infoMsg = fmt.Sprintf("Copied: cd %s", path)
+				} else {
+					m.infoMsg = fmt.Sprintf("cd %s", path)
+				}
+				m.errMsg = ""
 			}
 			return m, nil
 		case "r":
@@ -305,6 +460,15 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeCreate
 			return m, nil
 		case "c":
+			if m.staleCount == 1 && len(m.stalePaths) == 1 {
+				path := m.stalePaths[0]
+				if err := m.git.RemoveWorktree(path, false); err != nil {
+					m.errMsg = fmt.Sprintf("Failed to remove %s: %v", path, err)
+				} else {
+					m.infoMsg = fmt.Sprintf("Removed: %s", path)
+				}
+				return m, m.loadWorktrees
+			}
 			m.findStaleWorktrees()
 			m.cleanup.currentIndex = 0
 			m.mode = modeCleanup
@@ -314,16 +478,18 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.worktrees) == 0 {
 			return m, nil
 		}
-		if m.selected < len(m.worktrees)-1 {
-			m.selected++
-		}
+		m.selected = advanceSelected(m.selected, +1, m.worktrees, m.filterText)
 		return m, nil
 	case tea.KeyUp:
 		if len(m.worktrees) == 0 {
 			return m, nil
 		}
-		if m.selected > 0 {
-			m.selected--
+		m.selected = advanceSelected(m.selected, -1, m.worktrees, m.filterText)
+		return m, nil
+	case tea.KeyEscape:
+		if m.filterText != "" {
+			m.filterText = ""
+			m.selected = 0
 		}
 		return m, nil
 	case tea.KeyEnter:
