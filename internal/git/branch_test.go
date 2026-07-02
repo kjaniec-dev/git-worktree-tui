@@ -13,7 +13,7 @@ func TestParseBranchList(t *testing.T) {
 `
 
 	branches := parseBranchList(output)
-	
+
 	if len(branches) != 3 {
 		t.Fatalf("Expected 3 branches, got %d", len(branches))
 	}

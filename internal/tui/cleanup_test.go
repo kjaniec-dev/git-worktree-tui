@@ -13,12 +13,12 @@ import (
 func TestClassifyStale(t *testing.T) {
 	branchSet := map[string]bool{"main": true, "develop": true}
 	wts := []model.Worktree{
-		{Path: "/main", Branch: "main", IsMain: true},                                  // excluded: main
-		{Path: "/locked", Branch: "develop", IsLocked: true},                          // excluded: locked
-		{Path: "/detached", Branch: "(detached)", Detached: true},                     // excluded: detached
+		{Path: "/main", Branch: "main", IsMain: true},                                     // excluded: main
+		{Path: "/locked", Branch: "develop", IsLocked: true},                              // excluded: locked
+		{Path: "/detached", Branch: "(detached)", Detached: true},                         // excluded: detached
 		{Path: "/dirty", Branch: "develop", Status: &model.WorktreeStatus{IsDirty: true}}, // excluded: dirty
-		{Path: "/stale", Branch: "gone-branch"},                                       // stale: branch not in set
-		{Path: "/clean", Branch: "develop"},                                           // not stale: branch in set
+		{Path: "/stale", Branch: "gone-branch"},                                           // stale: branch not in set
+		{Path: "/clean", Branch: "develop"},                                               // not stale: branch in set
 	}
 	got := classifyStale(wts, branchSet)
 	want := []int{4}

@@ -126,7 +126,7 @@ func (m Model) View() string {
 	}
 
 	var b strings.Builder
-	
+
 	// Title
 	b.WriteString(titleStyle.Render("git-worktree-tui"))
 	b.WriteString("\n\n")
@@ -158,7 +158,7 @@ func (m Model) View() string {
 
 		b.WriteString(line)
 		b.WriteString("\n")
-		
+
 		commitDisplay := wt.Commit
 		if len(commitDisplay) > 7 {
 			commitDisplay = commitDisplay[:7]

@@ -60,7 +60,7 @@ func (m Model) handleDeleteKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 
 			force := wt.Status != nil && wt.Status.IsDirty
-		err := m.git.RemoveWorktree(wt.Path, force)
+			err := m.git.RemoveWorktree(wt.Path, force)
 			if err != nil {
 				m.errMsg = err.Error()
 				return m, nil

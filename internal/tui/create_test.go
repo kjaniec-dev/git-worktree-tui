@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
 )
 
 func sendCreate(m Model, msg tea.KeyMsg) tea.Model {
@@ -16,8 +16,8 @@ func teaKeyPress(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
-func teaKeyDown() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyDown} }
-func teaKeyUp() tea.KeyMsg    { return tea.KeyMsg{Type: tea.KeyUp} }
+func teaKeyDown() tea.KeyMsg      { return tea.KeyMsg{Type: tea.KeyDown} }
+func teaKeyUp() tea.KeyMsg        { return tea.KeyMsg{Type: tea.KeyUp} }
 func teaKeyBackspace() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyBackspace} }
 
 func TestCreateModal(t *testing.T) {
@@ -26,7 +26,7 @@ func TestCreateModal(t *testing.T) {
 	m.mode = modeCreate
 
 	view := m.View()
-	
+
 	if view == "" {
 		t.Error("Expected create modal view")
 	}

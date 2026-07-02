@@ -34,12 +34,12 @@ func (m Model) viewCleanupModal() string {
 		if m.cleanup.selected[i] {
 			prefix = "[x]"
 		}
-		
+
 		line := fmt.Sprintf("%s %s (%s)", prefix, wt.Branch, wt.Path)
 		if i == m.cleanup.currentIndex {
 			line = selectedStyle.Render(line)
 		}
-		
+
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
