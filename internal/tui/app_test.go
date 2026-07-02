@@ -142,3 +142,46 @@ func TestStatusGlyphs(t *testing.T) {
 		t.Errorf("dirty/clean glyphs collided:\n%s", view)
 	}
 }
+
+func TestEnterSetsInfoMsgNotErrMsg(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{
+		{Path: "/tmp/mypath", Branch: "feat"},
+	}
+	m.selected = 0
+	m.mode = modeList
+
+	out, _ := m.handleKeyPress(tea.KeyMsg{Type: tea.KeyEnter})
+	mm := out.(Model)
+
+	if mm.errMsg != "" {
+		t.Errorf("errMsg should be empty on Enter, got %q", mm.errMsg)
+	}
+	if mm.infoMsg == "" {
+		t.Error("expected infoMsg to be set on Enter, got empty")
+	}
+	if !strings.Contains(mm.infoMsg, "/tmp/mypath") {
+		t.Errorf("expected infoMsg to contain the path, got %q", mm.infoMsg)
+	}
+
+	// View must render infoMsg (at minimum the text appears).
+	view := mm.View()
+	if !strings.Contains(view, mm.infoMsg) {
+		t.Errorf("expected infoMsg in view, got:\n%s", view)
+	}
+}
+
+func TestInfoMsgClearedOnNextKeypress(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{{Path: "/p", Branch: "b"}}
+	m.selected = 0
+	m.infoMsg = "lingering from before"
+	m.mode = modeList
+
+	// Any keypress should clear infoMsg
+	out, _ := m.handleKeyPress(tea.KeyMsg{Type: tea.KeyUp})
+	mm := out.(Model)
+	if mm.infoMsg != "" {
+		t.Errorf("infoMsg should be cleared on next keypress, got %q", mm.infoMsg)
+	}
+}

@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/aymanbagabas/go-osc52/v2"
 	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
@@ -195,6 +197,11 @@ func (m Model) View() string {
 	// Help
 	b.WriteString(helpStyle.Render("[a]dd [d]elete [c]leanup [r]efresh [q]uit"))
 
+	if m.infoMsg != "" {
+		b.WriteString("\n")
+		b.WriteString(infoStyle.Render(m.infoMsg))
+	}
+
 	// Error message
 	if m.errMsg != "" {
 		b.WriteString("\n\n")
@@ -251,7 +258,15 @@ func (m Model) loadWorktrees() tea.Msg {
 	return worktreesLoadedMsg{worktrees: worktrees}
 }
 
+func tryCopyClipboard(path string) bool {
+	if _, err := fmt.Fprint(os.Stderr, osc52.New(path)); err != nil {
+		return false
+	}
+	return true
+}
+
 func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.infoMsg = ""
 	switch msg.Type {
 	case tea.KeyRunes:
 		switch msg.String() {
@@ -314,7 +329,13 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
 			path := m.worktrees[m.selected].Path
-			m.errMsg = fmt.Sprintf("Path: %s", path)
+			copied := tryCopyClipboard(path)
+			if copied {
+				m.infoMsg = fmt.Sprintf("Copied: %s", path)
+			} else {
+				m.infoMsg = fmt.Sprintf("Path: %s", path)
+			}
+			m.errMsg = ""
 		}
 		return m, nil
 	case tea.KeyCtrlC:
