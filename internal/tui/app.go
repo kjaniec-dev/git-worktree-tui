@@ -140,6 +140,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case tickMsg:
+		if !shouldAutoReload(m.mode) {
+			// Don't reload out from under an open modal: the cleanup
+			// modal caches indices into m.worktrees that would dangle
+			// (and panic on render) if the list shrinks, and the delete
+			// confirmation would silently start referring to a different
+			// worktree than the one on screen. Still reschedule so
+			// refresh resumes once the user returns to the list.
+			return m, autoRefresh()
+		}
 		return m, tea.Batch(m.loadWorktrees, autoRefresh())
 	case worktreesLoadedMsg:
 		m.worktrees = msg.worktrees
@@ -149,6 +158,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.selected < 0 {
 			m.selected = 0
+		}
+		if m.mode == modeCleanup {
+			// Defense in depth: even though the tick that drives most
+			// refreshes is paused during modeCleanup (see shouldAutoReload),
+			// a refresh already in flight when 'c' was pressed can still
+			// land here. Drop any cached indices that no longer fit rather
+			// than let viewCleanupModal index out of range.
+			m.cleanup.staleWorktrees, m.cleanup.selected, m.cleanup.reasons =
+				clampCleanupIndices(m.cleanup.staleWorktrees, m.cleanup.selected, m.cleanup.reasons, len(m.worktrees))
+			if m.cleanup.currentIndex >= len(m.cleanup.staleWorktrees) {
+				m.cleanup.currentIndex = 0
+			}
 		}
 		if m.filterText != "" && m.selected < len(m.worktrees) {
 			needle := strings.ToLower(m.filterText)
@@ -512,6 +533,36 @@ func computeScrollOffset(selectedPos, visibleCount, maxVisible int) int {
 		offset = maxOffset
 	}
 	return offset
+}
+
+// shouldAutoReload reports whether the periodic auto-refresh tick should
+// actually reload the worktree list for the given mode. It's paused for
+// modals that depend on m.worktrees staying stable while they're open —
+// see the tickMsg handler in Update for why.
+func shouldAutoReload(mode appMode) bool {
+	switch mode {
+	case modeDelete, modeCleanup:
+		return false
+	default:
+		return true
+	}
+}
+
+// clampCleanupIndices drops entries from the cleanup modal's parallel
+// slices whose worktree index no longer exists in a worktrees slice of the
+// given length, keeping idxs/selected/reasons in sync with each other.
+func clampCleanupIndices(idxs []int, selected []bool, reasons []string, worktreeCount int) ([]int, []bool, []string) {
+	outIdx := make([]int, 0, len(idxs))
+	outSel := make([]bool, 0, len(idxs))
+	outReason := make([]string, 0, len(idxs))
+	for i, idx := range idxs {
+		if idx < worktreeCount {
+			outIdx = append(outIdx, idx)
+			outSel = append(outSel, selected[i])
+			outReason = append(outReason, reasons[i])
+		}
+	}
+	return outIdx, outSel, outReason
 }
 
 func staleHintText(count int) string {

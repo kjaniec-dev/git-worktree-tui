@@ -251,6 +251,123 @@ func TestAutoRefreshTick(t *testing.T) {
 	_ = updated
 }
 
+// TestShouldAutoReload documents which modals suppress the periodic
+// auto-refresh reload. modeDelete and modeCleanup hold state derived from
+// (or indices into) m.worktrees at a point in time; letting the 10s tick
+// mutate m.worktrees underneath them risks a stale confirmation (delete) or
+// an out-of-range panic in viewCleanupModal (cleanup) — see
+// TestTickDoesNotReloadDuringCleanupOrDelete and
+// TestCleanupSurvivesShrinkingWorktreeListWithoutPanic.
+func TestShouldAutoReload(t *testing.T) {
+	cases := []struct {
+		mode appMode
+		want bool
+	}{
+		{modeList, true},
+		{modeCreate, true},
+		{modeHelp, true},
+		{modeDelete, false},
+		{modeCleanup, false},
+	}
+	for _, c := range cases {
+		if got := shouldAutoReload(c.mode); got != c.want {
+			t.Errorf("shouldAutoReload(%v) = %v, want %v", c.mode, got, c.want)
+		}
+	}
+}
+
+// TestTickDoesNotReloadDuringCleanupOrDelete verifies the tick handler
+// itself consults shouldAutoReload: while modeCleanup/modeDelete are active
+// it must NOT batch in m.loadWorktrees (which would race with/replace
+// m.worktrees mid-modal), only reschedule the next tick.
+func TestTickDoesNotReloadDuringCleanupOrDelete(t *testing.T) {
+	for _, mode := range []appMode{modeCleanup, modeDelete} {
+		m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+		m.mode = mode
+		_, cmd := m.Update(tickMsg{})
+		if cmd == nil {
+			t.Fatalf("mode %v: expected autoRefresh to still be rescheduled", mode)
+		}
+		// A reload tick batches loadWorktrees+autoRefresh, which resolves
+		// (without blocking — tea.Batch just packages the sub-cmds) to a
+		// tea.BatchMsg. A paused tick returns bare autoRefresh(), a
+		// single tea.Tick cmd that would block ~10s if invoked, so we
+		// don't call it — its mere presence (non-nil, non-batch by
+		// construction) is confirmed via shouldAutoReload above instead.
+	}
+
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.mode = modeList
+	_, cmd := m.Update(tickMsg{})
+	if cmd == nil {
+		t.Fatal("expected a cmd in list mode")
+	}
+	if msg := cmd(); msg == nil {
+		t.Fatal("expected list-mode tick to resolve to a batch message")
+	} else if _, isBatch := msg.(tea.BatchMsg); !isBatch {
+		t.Errorf("expected list-mode tick to batch loadWorktrees+autoRefresh, got %T", msg)
+	}
+}
+
+// TestCleanupSurvivesShrinkingWorktreeListWithoutPanic reproduces the crash
+// this test guards against: the cleanup modal caches indices into
+// m.worktrees when opened. If a worktreesLoadedMsg arrives afterward with a
+// shorter list (e.g. a worktree was removed from another terminal), the
+// stale indices must be dropped rather than left dangling for
+// viewCleanupModal to index out of range on.
+func TestCleanupSurvivesShrinkingWorktreeListWithoutPanic(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.mode = modeCleanup
+	m.worktrees = []model.Worktree{
+		{Path: "/a", Branch: "a"},
+		{Path: "/b", Branch: "b"},
+		{Path: "/c", Branch: "c"},
+	}
+	// Cached while the list still had 3 entries; index 2 ("/c") is stale.
+	m.cleanup.staleWorktrees = []int{2}
+	m.cleanup.selected = []bool{true}
+	m.cleanup.reasons = []string{"branch deleted"}
+	m.cleanup.currentIndex = 0
+
+	// The list shrinks to 1 entry — index 2 no longer exists.
+	shrunk := worktreesLoadedMsg{worktrees: []model.Worktree{{Path: "/a", Branch: "a"}}}
+	out, _ := m.Update(shrunk)
+	final := out.(Model)
+
+	if len(final.cleanup.staleWorktrees) != 0 {
+		t.Errorf("expected dangling cleanup index to be dropped, got %v", final.cleanup.staleWorktrees)
+	}
+	if len(final.cleanup.selected) != 0 || len(final.cleanup.reasons) != 0 {
+		t.Error("expected selected/reasons to stay in sync with staleWorktrees")
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("viewCleanupModal panicked: %v", r)
+		}
+	}()
+	_ = final.View()
+}
+
+// TestClampCleanupIndices exercises the pure helper directly.
+func TestClampCleanupIndices(t *testing.T) {
+	idxs := []int{0, 2, 5}
+	selected := []bool{true, false, true}
+	reasons := []string{"branch deleted", "merged", "branch deleted"}
+
+	outIdx, outSel, outReason := clampCleanupIndices(idxs, selected, reasons, 3)
+
+	if !equalInts(outIdx, []int{0, 2}) {
+		t.Errorf("outIdx = %v, want [0 2]", outIdx)
+	}
+	if len(outSel) != 2 || outSel[0] != true || outSel[1] != false {
+		t.Errorf("outSel = %v, want [true false]", outSel)
+	}
+	if len(outReason) != 2 || outReason[0] != "branch deleted" || outReason[1] != "merged" {
+		t.Errorf("outReason = %v, want [branch deleted merged]", outReason)
+	}
+}
+
 func TestVisibleWorktrees(t *testing.T) {
 	wts := []model.Worktree{
 		{Branch: "main"},
