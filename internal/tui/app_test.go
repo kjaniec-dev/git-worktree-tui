@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -305,6 +306,236 @@ func TestOKeybind(t *testing.T) {
 	}
 	if mm.errMsg != "" {
 		t.Errorf("errMsg should be empty on o, got %q", mm.errMsg)
+	}
+}
+
+func TestBusyViewShowsSpinnerAndLabel(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.busy = true
+	m.busyLabel = "Creating worktree..."
+
+	view := m.View()
+	if !strings.Contains(view, "Creating worktree...") {
+		t.Errorf("expected busy label in view, got:\n%s", view)
+	}
+}
+
+func TestCtrlCQuitsWhileBusy(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.busy = true
+	m.busyLabel = "Removing worktree..."
+	m.mode = modeDelete
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("expected a cmd from Ctrl+C while busy")
+	}
+	if msg := cmd(); msg != tea.Quit() {
+		t.Errorf("expected tea.Quit from Ctrl+C while busy, got %v", msg)
+	}
+}
+
+func TestCtrlCQuitsFromEveryModal(t *testing.T) {
+	for _, mode := range []appMode{modeList, modeCreate, modeDelete, modeCleanup, modeHelp} {
+		m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+		m.mode = mode
+
+		out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		_ = out
+		if cmd == nil {
+			t.Fatalf("mode %v: expected a cmd from Ctrl+C", mode)
+		}
+		if msg := cmd(); msg != tea.Quit() {
+			t.Errorf("mode %v: expected tea.Quit from Ctrl+C, got %v", mode, msg)
+		}
+	}
+}
+
+func TestBusyModeIgnoresKeypresses(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{{Path: "/p", Branch: "b"}}
+	m.busy = true
+	m.busyLabel = "Removing worktree..."
+	m.mode = modeDelete
+
+	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	mm := out.(Model)
+	if !mm.busy {
+		t.Error("expected busy to remain true; keypress should be ignored while busy")
+	}
+	if cmd != nil {
+		t.Error("expected no cmd from an ignored keypress while busy")
+	}
+}
+
+func TestLockKeybindCannotLockMain(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{{Path: "/main", Branch: "main", IsMain: true}}
+	m.selected = 0
+	m.mode = modeList
+
+	out, _ := m.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	mm := out.(Model)
+	if mm.errMsg == "" {
+		t.Error("expected error locking main worktree")
+	}
+}
+
+func TestLockKeybindErrorOnFailure(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/nonexistent-repo-12345"), "/tmp/test")
+	m.worktrees = []model.Worktree{{Path: "/tmp/no-such", Branch: "feat"}}
+	m.selected = 0
+	m.mode = modeList
+
+	out, cmd := m.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	mm := out.(Model)
+	if !mm.busy {
+		t.Fatal("expected busy=true while the lock operation is in flight")
+	}
+	if cmd == nil {
+		t.Fatal("expected a cmd (spinner tick + lock op) while busy")
+	}
+
+	// Run the async lock op directly and feed its result back through
+	// Update, mirroring what bubbletea does when a batched cmd resolves.
+	result := lockWorktreeCmd(mm.git, "/tmp/no-such", "feat", false)()
+	out2, _ := mm.Update(result)
+	final := out2.(Model)
+	if final.errMsg == "" {
+		t.Error("expected errMsg set when LockWorktree fails")
+	}
+	if final.busy {
+		t.Error("expected busy=false after the result is processed")
+	}
+}
+
+func TestMaxVisibleRows(t *testing.T) {
+	if got := maxVisibleRows(0, 4); got != 0 {
+		t.Errorf("unknown height (0) should mean unlimited (0), got %d", got)
+	}
+	if got := maxVisibleRows(-5, 4); got != 0 {
+		t.Errorf("negative height should mean unlimited (0), got %d", got)
+	}
+	if got := maxVisibleRows(20, 4); got != 5 {
+		t.Errorf("maxVisibleRows(20, 4) = %d, want 5", got)
+	}
+	if got := maxVisibleRows(5, 4); got != 1 {
+		t.Errorf("maxVisibleRows(5, 4) = %d, want 1 (never less than 1)", got)
+	}
+}
+
+func TestComputeScrollOffset(t *testing.T) {
+	// Unlimited (maxVisible <= 0): always 0.
+	if got := computeScrollOffset(9, 20, 0); got != 0 {
+		t.Errorf("maxVisible<=0 should disable scrolling, got %d", got)
+	}
+	// List fits entirely: always 0.
+	if got := computeScrollOffset(2, 5, 10); got != 0 {
+		t.Errorf("list fits, want offset 0, got %d", got)
+	}
+	// Selection near the top: offset clamps to 0.
+	if got := computeScrollOffset(0, 20, 5); got != 0 {
+		t.Errorf("selection at top, want offset 0, got %d", got)
+	}
+	// Selection near the bottom: offset clamps so window doesn't overshoot.
+	if got := computeScrollOffset(19, 20, 5); got != 15 {
+		t.Errorf("selection at bottom, want offset 15, got %d", got)
+	}
+	// Selection in the middle: centers the selection in the window.
+	if got := computeScrollOffset(10, 20, 5); got != 8 {
+		t.Errorf("selection in middle, want centered offset 8, got %d", got)
+	}
+}
+
+func TestVisibleRowIndicesAndPositionOf(t *testing.T) {
+	wts := []model.Worktree{
+		{Branch: "main"}, {Branch: "feature/auth"}, {Branch: "dev/fix"},
+	}
+	idxs := visibleRowIndices(wts, "")
+	if !equalInts(idxs, []int{0, 1, 2}) {
+		t.Errorf("empty filter idxs = %v, want [0 1 2]", idxs)
+	}
+	idxs = visibleRowIndices(wts, "auth")
+	if !equalInts(idxs, []int{1}) {
+		t.Errorf("auth filter idxs = %v, want [1]", idxs)
+	}
+	if pos := positionOf(idxs, 1); pos != 0 {
+		t.Errorf("positionOf(idxs, 1) = %d, want 0", pos)
+	}
+	if pos := positionOf(idxs, 0); pos != -1 {
+		t.Errorf("positionOf(idxs, 0) = %d, want -1 (filtered out)", pos)
+	}
+}
+
+func TestListScrollsWhenLongerThanTerminal(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	var wts []model.Worktree
+	for i := 0; i < 30; i++ {
+		wts = append(wts, model.Worktree{Path: fmt.Sprintf("/p%d", i), Branch: fmt.Sprintf("branch-%d", i)})
+	}
+	m.worktrees = wts
+	m.mode = modeList
+	m.width = 80
+	m.height = 20 // small terminal: far fewer than 30*3 lines needed
+
+	m.selected = 0
+	view := m.View()
+	if !strings.Contains(view, "branch-0") {
+		t.Errorf("expected first row visible when selected=0:\n%s", view)
+	}
+	if strings.Contains(view, "branch-29") {
+		t.Errorf("did not expect last row visible when selected=0 on a short terminal:\n%s", view)
+	}
+	if !strings.Contains(view, "more below") {
+		t.Errorf("expected a 'more below' indicator:\n%s", view)
+	}
+
+	m.selected = 29
+	view = m.View()
+	if !strings.Contains(view, "branch-29") {
+		t.Errorf("expected last row visible when selected=29:\n%s", view)
+	}
+	if !strings.Contains(view, "more above") {
+		t.Errorf("expected a 'more above' indicator:\n%s", view)
+	}
+}
+
+func TestListNoScrollIndicatorWhenEverythingFits(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{{Path: "/p", Branch: "a"}, {Path: "/p2", Branch: "b"}}
+	m.mode = modeList
+	m.width = 80
+	m.height = 40
+
+	view := m.View()
+	if strings.Contains(view, "more above") || strings.Contains(view, "more below") {
+		t.Errorf("did not expect scroll indicators when list fits:\n%s", view)
+	}
+}
+
+func TestGKeybindSelectsAndQuits(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	m.worktrees = []model.Worktree{{Path: "/wt/feat", Branch: "feat"}}
+	m.selected = 0
+	m.mode = modeList
+
+	out, cmd := m.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	mm := out.(Model)
+	if mm.SelectedPath() != "/wt/feat" {
+		t.Errorf("SelectedPath() = %q, want /wt/feat", mm.SelectedPath())
+	}
+	if cmd == nil {
+		t.Fatal("expected tea.Quit cmd from 'g'")
+	}
+	if msg := cmd(); msg != tea.Quit() {
+		t.Errorf("expected tea.Quit message, got %v", msg)
+	}
+}
+
+func TestSelectedPathEmptyByDefault(t *testing.T) {
+	m := NewModel(git.NewGitService("/tmp/test"), "/tmp/test")
+	if m.SelectedPath() != "" {
+		t.Errorf("SelectedPath() = %q, want empty by default", m.SelectedPath())
 	}
 }
 

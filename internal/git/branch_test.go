@@ -68,3 +68,57 @@ func TestBranchExists(t *testing.T) {
 		t.Errorf("BranchExists(nope/missing) = %v, %v; want false, nil", exists, err)
 	}
 }
+
+func TestBuildDeleteBranchArgs(t *testing.T) {
+	if got := buildDeleteBranchArgs("feat", false); !equalSlices(got, []string{"branch", "-d", "feat"}) {
+		t.Errorf("safe delete args = %v", got)
+	}
+	if got := buildDeleteBranchArgs("feat", true); !equalSlices(got, []string{"branch", "-D", "feat"}) {
+		t.Errorf("force delete args = %v", got)
+	}
+}
+
+func TestMergedBranchesAndDeleteBranch(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) {
+		fullArgs := append([]string{"-C", repo}, args...)
+		if out, err := exec.Command("git", fullArgs...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "base")
+	run("config", "user.email", "t@t")
+	run("config", "user.name", "t")
+	run("commit", "--allow-empty", "-m", "init")
+	run("branch", "merged-branch") // fully merged into base (same commit)
+	run("checkout", "-b", "unmerged-branch")
+	run("commit", "--allow-empty", "-m", "unmerged commit")
+	run("checkout", "base")
+
+	g := NewGitService(repo)
+
+	merged, err := g.MergedBranches("base")
+	if err != nil {
+		t.Fatalf("MergedBranches: %v", err)
+	}
+	mergedSet := make(map[string]bool)
+	for _, b := range merged {
+		mergedSet[b] = true
+	}
+	if !mergedSet["merged-branch"] {
+		t.Errorf("expected merged-branch in MergedBranches(base), got %v", merged)
+	}
+	if mergedSet["unmerged-branch"] {
+		t.Errorf("unmerged-branch should NOT be in MergedBranches(base), got %v", merged)
+	}
+
+	if err := g.DeleteBranch("merged-branch", false); err != nil {
+		t.Errorf("DeleteBranch(merged-branch, safe) failed: %v", err)
+	}
+	if err := g.DeleteBranch("unmerged-branch", false); err == nil {
+		t.Error("expected safe DeleteBranch to fail on unmerged branch")
+	}
+	if err := g.DeleteBranch("unmerged-branch", true); err != nil {
+		t.Errorf("DeleteBranch(unmerged-branch, force) failed: %v", err)
+	}
+}

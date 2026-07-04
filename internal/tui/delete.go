@@ -7,6 +7,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// deleteModel holds transient state for the delete-confirmation modal.
+type deleteModel struct {
+	alsoDeleteBranch bool
+}
+
 func (m Model) viewDeleteModal() string {
 	if m.selected >= len(m.worktrees) {
 		return ""
@@ -28,9 +33,20 @@ func (m Model) viewDeleteModal() string {
 		b.WriteString("⚠ This will remove the worktree directory.\n\n")
 	}
 
+	if !wt.Detached && wt.Branch != "" {
+		checkbox := "[ ]"
+		if m.delete.alsoDeleteBranch {
+			checkbox = "[x]"
+		}
+		b.WriteString(fmt.Sprintf("%s Also delete branch %q\n\n", checkbox, wt.Branch))
+	}
+
 	confirmHint := "[y]es [n]o"
 	if wt.Status != nil && wt.Status.IsDirty {
 		confirmHint = "[y] force-remove [n]o"
+	}
+	if !wt.Detached && wt.Branch != "" {
+		confirmHint += " [b] toggle branch delete"
 	}
 	b.WriteString(helpStyle.Render(confirmHint))
 
@@ -60,18 +76,21 @@ func (m Model) handleDeleteKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 
 			force := wt.Status != nil && wt.Status.IsDirty
-			err := m.git.RemoveWorktree(wt.Path, force)
-			if err != nil {
-				m.errMsg = err.Error()
-				return m, nil
-			}
-
-			m.mode = modeList
-			return m, m.loadWorktrees
+			m.errMsg = ""
+			alsoDeleteBranch := m.delete.alsoDeleteBranch && !wt.Detached && wt.Branch != ""
+			cmd := startBusy(&m, "Removing worktree...",
+				removeWorktreeCmd(m.git, wt.Path, wt.Branch, force, alsoDeleteBranch))
+			return m, cmd
 		case "n":
 			m.mode = modeList
 			return m, nil
+		case "b":
+			m.delete.alsoDeleteBranch = !m.delete.alsoDeleteBranch
+			return m, nil
 		}
+	case tea.KeySpace:
+		m.delete.alsoDeleteBranch = !m.delete.alsoDeleteBranch
+		return m, nil
 	case tea.KeyEscape:
 		m.mode = modeList
 		return m, nil

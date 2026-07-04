@@ -10,27 +10,27 @@ import (
 // parseStatus parses the output of git status --porcelain=v2
 func parseStatus(output string) model.WorktreeStatus {
 	status := model.WorktreeStatus{}
-	
+
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		
+
 		// Check for untracked files (start with ?)
 		if strings.HasPrefix(line, "?") {
 			status.Untracked++
 			status.IsDirty = true
 			continue
 		}
-		
+
 		// Any other line indicates a change
 		if len(line) > 0 {
 			status.IsDirty = true
 		}
 	}
-	
+
 	return status
 }
 

@@ -100,6 +100,76 @@ func TestRemoveWorktreeCommand(t *testing.T) {
 	}
 }
 
+func TestLockUnlockWorktree(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"-C", repo, "init"},
+		{"-C", repo, "config", "user.email", "t@t"},
+		{"-C", repo, "config", "user.name", "t"},
+		{"-C", repo, "commit", "--allow-empty", "-m", "init"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	g := NewGitService(repo)
+	wtPath := filepath.Join(t.TempDir(), "feat-x")
+	if err := g.AddWorktree(wtPath, "feat-x", "main", true); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+
+	// Resolve symlinks (e.g. macOS /tmp -> /private/tmp) since git normalizes
+	// worktree paths to their real path in `worktree list --porcelain`.
+	resolvedWtPath, err := filepath.EvalSymlinks(wtPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	if err := g.LockWorktree(wtPath); err != nil {
+		t.Fatalf("LockWorktree: %v", err)
+	}
+	worktrees, err := g.ListWorktrees()
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	found := false
+	for _, wt := range worktrees {
+		if wt.Path == resolvedWtPath {
+			found = true
+			if !wt.IsLocked {
+				t.Error("expected worktree to be locked after LockWorktree")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("worktree %s not found after AddWorktree; got %+v", resolvedWtPath, worktrees)
+	}
+
+	if err := g.UnlockWorktree(wtPath); err != nil {
+		t.Fatalf("UnlockWorktree: %v", err)
+	}
+	worktrees, err = g.ListWorktrees()
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	for _, wt := range worktrees {
+		if wt.Path == resolvedWtPath && wt.IsLocked {
+			t.Error("expected worktree to be unlocked after UnlockWorktree")
+		}
+	}
+}
+
+func TestLockWorktreeNonexistentRepo(t *testing.T) {
+	g := NewGitService("/tmp/nonexistent-repo-12345")
+	if err := g.LockWorktree("/tmp/nonexistent-worktree"); err == nil {
+		t.Error("expected error locking worktree in nonexistent repo")
+	}
+	if err := g.UnlockWorktree("/tmp/nonexistent-worktree"); err == nil {
+		t.Error("expected error unlocking worktree in nonexistent repo")
+	}
+}
+
 func equalSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

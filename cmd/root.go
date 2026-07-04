@@ -55,8 +55,19 @@ func run(cmd *cobra.Command, args []string) error {
 	// Create and run TUI
 	model := tui.NewModel(gitService, cwd)
 	p := tea.NewProgram(model, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		return fmt.Errorf("error running program: %w", err)
+	}
+
+	// After the alt-screen program exits, print the path the user selected
+	// via 'g' (select-and-quit) to stdout, if any. This lets a shell
+	// wrapper function `cd` into it via command substitution — see the
+	// "Shell integration" section of the README.
+	if m, ok := finalModel.(interface{ SelectedPath() string }); ok {
+		if path := m.SelectedPath(); path != "" {
+			fmt.Println(path)
+		}
 	}
 
 	return nil

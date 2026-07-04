@@ -6,9 +6,9 @@ import (
 
 func TestParseStatusClean(t *testing.T) {
 	output := `` // Empty output = clean
-	
+
 	status := parseStatus(output)
-	
+
 	if status.IsDirty {
 		t.Error("Expected clean worktree")
 	}
@@ -21,9 +21,9 @@ func TestParseStatusDirty(t *testing.T) {
 	output := `1 .M N... 100644 100644 100644 abc123 def456 file.txt
 ? untracked.txt
 `
-	
+
 	status := parseStatus(output)
-	
+
 	if !status.IsDirty {
 		t.Error("Expected dirty worktree")
 	}

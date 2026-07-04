@@ -189,6 +189,30 @@ func (g *GitService) RemoveWorktree(path string, force bool) error {
 	return nil
 }
 
+// LockWorktree locks a worktree, preventing it from being pruned or removed
+// without --force. The main worktree cannot be locked; git returns an error
+// for that case, which is surfaced to the caller unchanged.
+func (g *GitService) LockWorktree(path string) error {
+	output, err := g.runGitCommand("worktree", "lock", path)
+	if err != nil {
+		return fmt.Errorf("failed to lock worktree %s: %w", path, err)
+	}
+
+	_ = output
+	return nil
+}
+
+// UnlockWorktree removes a lock previously set by LockWorktree.
+func (g *GitService) UnlockWorktree(path string) error {
+	output, err := g.runGitCommand("worktree", "unlock", path)
+	if err != nil {
+		return fmt.Errorf("failed to unlock worktree %s: %w", path, err)
+	}
+
+	_ = output
+	return nil
+}
+
 // PruneWorktrees removes stale worktree metadata
 func (g *GitService) PruneWorktrees() error {
 	output, err := g.runGitCommand("worktree", "prune")

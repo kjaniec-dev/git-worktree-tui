@@ -12,7 +12,7 @@ import (
 func parseBranchList(output string) []string {
 	var branches []string
 	lines := strings.Split(output, "\n")
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -26,7 +26,7 @@ func parseBranchList(output string) []string {
 		}
 		branches = append(branches, line)
 	}
-	
+
 	return branches
 }
 
@@ -38,6 +38,40 @@ func (g *GitService) ListBranches() ([]string, error) {
 	}
 
 	return parseBranchList(string(output)), nil
+}
+
+// MergedBranches returns local branches that are fully merged into base
+// (i.e. `git branch --merged <base>`), including base itself.
+func (g *GitService) MergedBranches(base string) ([]string, error) {
+	output, err := g.runGitCommand("branch", "--merged", base)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list merged branches: %w", err)
+	}
+
+	return parseBranchList(string(output)), nil
+}
+
+// buildDeleteBranchArgs constructs `git branch` delete args: -D when force,
+// -d (safe delete, refuses on unmerged work) otherwise.
+func buildDeleteBranchArgs(branch string, force bool) []string {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	return []string{"branch", flag, branch}
+}
+
+// DeleteBranch deletes a local branch. With force=false, git refuses to
+// delete branches with unmerged commits (safe default); force=true deletes
+// regardless.
+func (g *GitService) DeleteBranch(branch string, force bool) error {
+	output, err := g.runGitCommand(buildDeleteBranchArgs(branch, force)...)
+	if err != nil {
+		return fmt.Errorf("failed to delete branch %q: %w", branch, err)
+	}
+
+	_ = output
+	return nil
 }
 
 // BranchExists reports whether a *local branch* named <branch> exists.

@@ -45,7 +45,11 @@ func (m Model) viewCreateModal() string {
 
 	branchLabel := fmt.Sprintf("Branch name: [%s]", m.create.branchName)
 	baseLabel := fmt.Sprintf("Base: [%s]", m.create.baseBranch)
-	checkboxLabel := fmt.Sprintf("☐ Create new branch from base: %v", m.create.createBranch)
+	checkbox := "☐"
+	if m.create.createBranch {
+		checkbox = "☑"
+	}
+	checkboxLabel := fmt.Sprintf("%s Create new branch from base", checkbox)
 	var insidePart, outsidePart string
 	if m.create.location == "inside" {
 		insidePart = activeFieldStyle.Render("inside")
@@ -113,14 +117,11 @@ func (m Model) handleCreateKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.create.errMsg = "Branch name is required"
 			return m, nil
 		}
+		m.create.errMsg = ""
 		path := generateWorktreePath(m.git.RepoRoot, m.create.branchName, m.create.location)
-		err := m.git.AddWorktree(path, m.create.branchName, m.create.baseBranch, m.create.createBranch)
-		if err != nil {
-			m.create.errMsg = err.Error()
-			return m, nil
-		}
-		m.mode = modeList
-		return m, m.loadWorktrees
+		cmd := startBusy(&m, "Creating worktree...",
+			addWorktreeCmd(m.git, path, m.create.branchName, m.create.baseBranch, m.create.createBranch))
+		return m, cmd
 	case tea.KeyUp:
 		if m.create.currentField == fieldBase && len(m.create.branches) > 0 {
 			if m.create.baseIndex > 0 {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aymanbagabas/go-osc52/v2"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kjaniec-dev/git-worktree-tui/internal/git"
@@ -21,6 +22,7 @@ const (
 	modeCreate
 	modeDelete
 	modeCleanup
+	modeHelp
 )
 
 // initialBase selects the default base branch from the local branch list and
@@ -47,32 +49,50 @@ func initialBase(branches []string) (base string, index int) {
 }
 
 type Model struct {
-	git        *git.GitService
-	worktrees  []model.Worktree
-	selected   int
-	mode       appMode
-	errMsg     string
-	infoMsg    string // populated by Enter (Task 3); rendered with infoStyle
-	staleCount int
-	stalePaths []string
-	cwd        string // captured at startup; drives the (here) marker
-	width      int
-	height     int
-	create     createModel
-	cleanup    cleanupModel
-	filterMode bool
-	filterText string
+	git          *git.GitService
+	worktrees    []model.Worktree
+	selected     int
+	mode         appMode
+	errMsg       string
+	infoMsg      string // populated by Enter (Task 3); rendered with infoStyle
+	staleCount   int
+	stalePaths   []string
+	cwd          string // captured at startup; drives the (here) marker
+	width        int
+	height       int
+	create       createModel
+	cleanup      cleanupModel
+	filterMode   bool
+	filterText   string
+	delete       deleteModel
+	busy         bool
+	busyLabel    string
+	spinner      spinner.Model
+	selectedPath string // set by 'g'; read by cmd/root.go after the program exits
+}
+
+// SelectedPath returns the worktree path chosen via 'g' (select-and-quit),
+// or "" if the user quit normally. cmd/root.go prints this to stdout after
+// the Bubble Tea program exits so a shell wrapper can `cd` into it — see
+// the "Shell integration" section of the README.
+func (m Model) SelectedPath() string {
+	return m.selectedPath
 }
 
 func NewModel(gitService *git.GitService, cwd string) Model {
 	branches, _ := gitService.ListBranches()
 	baseBranch, baseIndex := initialBase(branches)
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = activeFieldStyle
+
 	return Model{
 		git:      gitService,
 		selected: 0,
 		mode:     modeList,
 		cwd:      cwd,
+		spinner:  sp,
 		create: createModel{
 			branches:     branches,
 			baseBranch:   baseBranch,
@@ -90,6 +110,19 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if msg.Type == tea.KeyCtrlC {
+			// Universal escape hatch: quit immediately regardless of mode
+			// or an in-flight busy operation. Without this, Ctrl+C was
+			// swallowed while busy (stuck up to the full command timeout)
+			// and inside every modal (create/delete/cleanup/help).
+			return m, tea.Quit
+		}
+		if m.busy {
+			// Ignore other input while an async git operation is in flight
+			// to avoid double-submission; GitService enforces its own
+			// command timeout, so this is never an indefinite lock.
+			return m, nil
+		}
 		switch m.mode {
 		case modeDelete:
 			return m.handleDeleteKeyPress(msg)
@@ -97,6 +130,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleCreateKeyPress(msg)
 		case modeCleanup:
 			return m.handleCleanupKeyPress(msg)
+		case modeHelp:
+			return m.handleHelpKeyPress(msg)
 		default:
 			return m.handleKeyPress(msg)
 		}
@@ -127,7 +162,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for _, b := range branches {
 				branchSet[b] = true
 			}
-			staleIdxs := classifyStale(m.worktrees, branchSet)
+			base, _ := initialBase(branches)
+			mergedSet := m.mergedBranchSet(base)
+			staleIdxs := classifyStale(m.worktrees, branchSet, mergedSet)
 			m.staleCount = len(staleIdxs)
 			m.stalePaths = make([]string, 0, len(staleIdxs))
 			for _, idx := range staleIdxs {
@@ -141,11 +178,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errMsg:
 		m.errMsg = string(msg)
 		return m, nil
+	case spinner.TickMsg:
+		if !m.busy {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	case createResultMsg:
+		return m.handleCreateResult(msg)
+	case deleteResultMsg:
+		return m.handleDeleteResult(msg)
+	case cleanupResultMsg:
+		return m.handleCleanupResult(msg)
+	case lockResultMsg:
+		return m.handleLockResult(msg)
 	}
 	return m, nil
 }
 
+// startBusy marks the model busy with the given label and returns a command
+// batching the spinner's first tick with the async operation itself.
+func startBusy(m *Model, label string, op tea.Cmd) tea.Cmd {
+	m.busy = true
+	m.busyLabel = label
+	return tea.Batch(m.spinner.Tick, op)
+}
+
+func (m Model) viewBusy() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("git-worktree-tui"))
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf("%s %s", m.spinner.View(), m.busyLabel))
+	b.WriteString("\n")
+	return b.String()
+}
+
 func (m Model) View() string {
+	if m.busy {
+		return m.viewBusy()
+	}
 	if m.mode == modeDelete {
 		return m.viewDeleteModal()
 	}
@@ -154,6 +226,9 @@ func (m Model) View() string {
 	}
 	if m.mode == modeCleanup {
 		return m.viewCleanupModal()
+	}
+	if m.mode == modeHelp {
+		return m.viewHelpModal()
 	}
 
 	if len(m.worktrees) == 0 {
@@ -166,14 +241,27 @@ func (m Model) View() string {
 	b.WriteString(titleStyle.Render("git-worktree-tui"))
 	b.WriteString("\n\n")
 
-	// Worktree list
-	for i, wt := range m.worktrees {
-		if m.filterText != "" {
-			needle := strings.ToLower(m.filterText)
-			if !strings.Contains(strings.ToLower(wt.Branch), needle) {
-				continue
-			}
-		}
+	// Worktree list — windowed/scrollable so long lists don't overflow the
+	// terminal. rowIdxs holds the indices (into m.worktrees) that pass the
+	// active filter, in display order.
+	rowIdxs := visibleRowIndices(m.worktrees, m.filterText)
+	selectedPos := positionOf(rowIdxs, m.selected)
+	maxVisible := maxVisibleRows(m.height, listOverheadLines(m))
+	scrollOffset := computeScrollOffset(selectedPos, len(rowIdxs), maxVisible)
+
+	windowEnd := len(rowIdxs)
+	if maxVisible > 0 && scrollOffset+maxVisible < windowEnd {
+		windowEnd = scrollOffset + maxVisible
+	}
+	visibleWindow := rowIdxs[scrollOffset:windowEnd]
+
+	if scrollOffset > 0 {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ↑ %d more above", scrollOffset)))
+		b.WriteString("\n")
+	}
+
+	for _, i := range visibleWindow {
+		wt := m.worktrees[i]
 		prefix := "  "
 		if i == m.selected {
 			prefix = "→ "
@@ -238,8 +326,13 @@ func (m Model) View() string {
 		b.WriteString("\n\n")
 	}
 
+	if remaining := len(rowIdxs) - windowEnd; remaining > 0 {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ↓ %d more below", remaining)))
+		b.WriteString("\n")
+	}
+
 	// Help
-	helpText := "[a]dd [d]elete [c]leanup [r]efresh [o]pen (cd) [/]filter [q]uit"
+	helpText := "[a]dd [d]elete [l]ock [c]leanup [r]efresh [g]o [o]pen (cd) [/]filter [?]help [q]uit"
 	if m.staleCount > 0 {
 		helpText = staleHintText(m.staleCount) + helpText
 	}
@@ -340,6 +433,85 @@ func truncatePath(path string) string {
 		return path
 	}
 	return "..." + sep + parts[len(parts)-2] + sep + parts[len(parts)-1]
+}
+
+// visibleRowIndices returns the indices into wts that pass the filter
+// (case-insensitive substring on Branch), in original order. Empty filter
+// returns every index.
+func visibleRowIndices(wts []model.Worktree, filterText string) []int {
+	idxs := make([]int, 0, len(wts))
+	needle := strings.ToLower(filterText)
+	for i, wt := range wts {
+		if filterText == "" || strings.Contains(strings.ToLower(wt.Branch), needle) {
+			idxs = append(idxs, i)
+		}
+	}
+	return idxs
+}
+
+// positionOf returns the position of target within idxs, or -1 if absent.
+func positionOf(idxs []int, target int) int {
+	for pos, idx := range idxs {
+		if idx == target {
+			return pos
+		}
+	}
+	return -1
+}
+
+// listOverheadLines estimates how many rendered lines in View() are NOT part
+// of the scrollable worktree list (title, footer help line, and any
+// conditionally-rendered info/error/filter lines), so maxVisibleRows can
+// budget the remaining terminal height for worktree rows.
+func listOverheadLines(m Model) int {
+	overhead := 4 // title (1 line + 1 blank) + help line (has MarginTop(1))
+	if m.infoMsg != "" {
+		overhead++
+	}
+	if m.errMsg != "" {
+		overhead += 2
+	}
+	if m.filterMode {
+		overhead++
+	}
+	return overhead
+}
+
+// maxVisibleRows returns how many 3-line worktree rows fit within height,
+// after subtracting overheadLines. Returns 0 (meaning "unlimited", i.e. no
+// scrolling) when height is unknown (<=0), which happens before the first
+// tea.WindowSizeMsg — this keeps output stable for callers/tests that never
+// send one.
+func maxVisibleRows(height, overheadLines int) int {
+	if height <= 0 {
+		return 0
+	}
+	rows := (height - overheadLines) / 3
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
+// computeScrollOffset returns the first visible-row index to render such
+// that selectedPos stays inside the [offset, offset+maxVisible) window,
+// centering the selection when the list is longer than the window.
+// maxVisible <= 0 or a list that already fits disables scrolling (offset 0).
+func computeScrollOffset(selectedPos, visibleCount, maxVisible int) int {
+	if maxVisible <= 0 || visibleCount <= maxVisible {
+		return 0
+	}
+	if selectedPos < 0 {
+		selectedPos = 0
+	}
+	offset := selectedPos - maxVisible/2
+	if offset < 0 {
+		offset = 0
+	}
+	if maxOffset := visibleCount - maxVisible; offset > maxOffset {
+		offset = maxOffset
+	}
+	return offset
 }
 
 func staleHintText(count int) string {
@@ -445,6 +617,31 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "r":
 			return m, m.loadWorktrees
+		case "g":
+			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
+				m.selectedPath = m.worktrees[m.selected].Path
+				return m, tea.Quit
+			}
+			return m, nil
+		case "?":
+			m.mode = modeHelp
+			return m, nil
+		case "l":
+			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
+				wt := m.worktrees[m.selected]
+				if wt.IsMain {
+					m.errMsg = "Cannot lock the main worktree"
+					return m, nil
+				}
+				m.errMsg = ""
+				label := "Locking worktree..."
+				if wt.IsLocked {
+					label = "Unlocking worktree..."
+				}
+				cmd := startBusy(&m, label, lockWorktreeCmd(m.git, wt.Path, wt.Branch, wt.IsLocked))
+				return m, cmd
+			}
+			return m, nil
 		case "d":
 			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
 				wt := m.worktrees[m.selected]
@@ -453,21 +650,40 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.errMsg = ""
+				m.delete = deleteModel{}
 				m.mode = modeDelete
 			}
 			return m, nil
 		case "a":
+			// Refresh the branch list (a branch created since NewModel ran,
+			// including via a previous 'a' session, must be selectable as a
+			// base) and reset the form so stale input from a prior open
+			// doesn't linger.
+			branches, _ := m.git.ListBranches()
+			baseBranch, baseIndex := initialBase(branches)
+			m.create = createModel{
+				branches:     branches,
+				baseBranch:   baseBranch,
+				baseIndex:    baseIndex,
+				createBranch: true,
+				location:     "inside",
+			}
 			m.mode = modeCreate
 			return m, nil
 		case "c":
 			if m.staleCount == 1 && len(m.stalePaths) == 1 {
 				path := m.stalePaths[0]
-				if err := m.git.RemoveWorktree(path, false); err != nil {
-					m.errMsg = fmt.Sprintf("Failed to remove %s: %v", path, err)
-				} else {
-					m.infoMsg = fmt.Sprintf("Removed: %s", path)
+				branch := ""
+				for _, wt := range m.worktrees {
+					if wt.Path == path && !wt.Detached {
+						branch = wt.Branch
+						break
+					}
 				}
-				return m, m.loadWorktrees
+				m.errMsg = ""
+				cmd := startBusy(&m, "Cleaning up 1 worktree...",
+					cleanupWorktreesCmd(m.git, []string{path}, []string{branch}))
+				return m, cmd
 			}
 			m.findStaleWorktrees()
 			m.cleanup.currentIndex = 0
@@ -504,8 +720,6 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.errMsg = ""
 		}
 		return m, nil
-	case tea.KeyCtrlC:
-		return m, tea.Quit
 	}
 	return m, nil
 }
